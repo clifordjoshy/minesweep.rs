@@ -1,8 +1,11 @@
-// my_runner/src/main.rs
+use minesweeper_core::*;
 
 fn main() {
-    // Call the function from your library package
-    let message = minesweeper_core::greet("Developer");
-
-    println!("{}", message);
+    let mut board = Board::from_seed(10, 10, 30, 15, 10).unwrap();
+    println!("---------");
+    board.print();
+    board.open_cell(17);
+    board.flag_cell(27);
+    board.open_cell(17);
+    board.print();
 }

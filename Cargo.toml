@@ -1,2 +1,3 @@
 [workspace]
 members = ["minesweeper_core", "testbench"]
+resolver = "3"
