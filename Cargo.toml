@@ -1,3 +1,10 @@
 [workspace]
-members = ["minesweeper_core", "testbench"]
+members = ["gui", "minesweeper_core"]
+default-members = ["gui"]
 resolver = "3"
+
+[profile.release]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2
