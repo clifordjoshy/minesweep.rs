@@ -17,6 +17,7 @@ pub enum CellState {
     Flagged,
 }
 
+#[derive(Clone)]
 pub struct Board {
     pub width: usize,
     pub height: usize,
@@ -41,8 +42,7 @@ pub enum BoardCellOpenResult {
 }
 
 impl Board {
-    #[inline]
-    fn neighbour_iter(idx: usize, width: usize, height: usize) -> impl Iterator<Item = usize> {
+    pub fn neighbour_iter(idx: usize, width: usize, height: usize) -> impl Iterator<Item = usize> {
         let (x, y) = ((idx % width) as i32, (idx / width) as i32);
 
         (-1..=1)
