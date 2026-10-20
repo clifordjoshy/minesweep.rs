@@ -151,6 +151,12 @@ impl eframe::App for app::App {
                 }
             }
 
+            ui.horizontal(|ui| {
+                ui.label(format!("Seed: {}", self.get_seed()));
+                ui.separator();
+                ui.label(self.status.label());
+            });
+
             egui::warn_if_debug_build(ui);
         });
     }

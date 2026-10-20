@@ -83,4 +83,9 @@ impl App {
         });
         mines as isize - flags as isize
     }
+
+    /// Mines minus flags placed (can go negative if the player over-flags).
+    pub fn get_seed(&self) -> u64 {
+        self.board.as_ref().map_or(0, |b| b.seed)
+    }
 }

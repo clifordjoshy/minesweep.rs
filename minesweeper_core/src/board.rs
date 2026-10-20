@@ -1,6 +1,6 @@
 use rand::prelude::{SeedableRng, SliceRandom, StdRng};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum CellContent {
     #[default]
     Empty,
@@ -9,7 +9,7 @@ pub enum CellContent {
 }
 
 /// The player's current interaction state with this tile.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum CellState {
     #[default]
     Hidden,
@@ -42,7 +42,8 @@ pub enum BoardCellOpenResult {
 }
 
 impl Board {
-    pub fn neighbour_iter(idx: usize, width: usize, height: usize) -> impl Iterator<Item = usize> {
+    pub fn neighbours_of(&self, idx: usize) -> impl Iterator<Item = usize> + use<> {
+        let (width, height) = (self.width, self.height);
         let (x, y) = ((idx % width) as i32, (idx / width) as i32);
 
         (-1..=1)
@@ -90,12 +91,19 @@ impl Board {
             return Err(BoardError::InvalidPosition);
         }
 
-        let definitely_not_mine_indices = Board::neighbour_iter(start_idx, width, height)
+        let mut board = Self {
+            width,
+            height,
+            mine_count,
+            seed,
+            state_grid: vec![CellState::default(); width * height].into_boxed_slice(),
+            content_grid: vec![CellContent::default(); width * height].into_boxed_slice(),
+        };
+
+        let definitely_not_mine_indices = board
+            .neighbours_of(start_idx)
             .chain(std::iter::once(start_idx))
             .collect::<Vec<_>>();
-
-        let mut content_grid = vec![CellContent::default(); width * height].into_boxed_slice();
-        let state_grid = vec![CellState::default(); width * height].into_boxed_slice();
 
         let mut indices_to_place = (0..total_cells)
             .filter(|idx| !definitely_not_mine_indices.contains(idx))
@@ -107,10 +115,10 @@ impl Board {
         let mine_indices = &indices_to_place[0..mine_count];
 
         for &midx in mine_indices {
-            content_grid[midx] = CellContent::Mine;
+            board.content_grid[midx] = CellContent::Mine;
 
-            for nidx in Board::neighbour_iter(midx, width, height) {
-                content_grid[nidx] = match content_grid[nidx] {
+            for nidx in board.neighbours_of(midx) {
+                board.content_grid[nidx] = match board.content_grid[nidx] {
                     CellContent::Empty => CellContent::Number(1),
                     CellContent::Number(c) => CellContent::Number(c + 1),
                     CellContent::Mine => CellContent::Mine,
@@ -118,14 +126,6 @@ impl Board {
             }
         }
 
-        let mut board = Self {
-            width,
-            height,
-            mine_count,
-            seed,
-            state_grid,
-            content_grid,
-        };
         board.open_cell(start_idx).unwrap();
 
         Ok(board)
@@ -147,7 +147,7 @@ impl Board {
                     CellContent::Empty => {
                         // open all hidden neighbours
                         let mut open_res = BoardCellOpenResult::Noop;
-                        for nidx in Board::neighbour_iter(open_idx, self.width, self.height) {
+                        for nidx in self.neighbours_of(open_idx) {
                             if self.state_grid[nidx] != CellState::Hidden {
                                 continue;
                             }
@@ -161,13 +161,14 @@ impl Board {
             CellState::Revealed(CellContent::Number(nearby_mines)) => {
                 // open all neighbours that can be opened given current markings aka chording
 
-                let marked_mines = Board::neighbour_iter(open_idx, self.width, self.height)
+                let marked_mines = self
+                    .neighbours_of(open_idx)
                     .map(|nidx| (self.state_grid[nidx] == CellState::Flagged) as u8)
                     .sum::<u8>();
 
                 let mut open_res = BoardCellOpenResult::Noop;
                 if nearby_mines == marked_mines {
-                    for nidx in Board::neighbour_iter(open_idx, self.width, self.height) {
+                    for nidx in self.neighbours_of(open_idx) {
                         if self.state_grid[nidx] != CellState::Hidden {
                             continue;
                         }
@@ -189,16 +190,17 @@ impl Board {
                 }
             }
             result = BoardCellOpenResult::AllMinesSweeped;
-        } else if result == BoardCellOpenResult::MineExploded {
-            // reveal all mines
-            for i in 0..self.state_grid.len() {
-                if self.content_grid[i] == CellContent::Mine
-                    && self.state_grid[i] == CellState::Hidden
-                {
-                    self.state_grid[i] = CellState::Revealed(CellContent::Mine);
-                }
-            }
         }
+        // else if result == BoardCellOpenResult::MineExploded {
+        // reveal all mines
+        // for i in 0..self.state_grid.len() {
+        //     if self.content_grid[i] == CellContent::Mine
+        //         && self.state_grid[i] == CellState::Hidden
+        //     {
+        //         self.state_grid[i] = CellState::Revealed(CellContent::Mine);
+        //     }
+        // }
+        // }
 
         Ok(result)
     }
@@ -231,5 +233,43 @@ impl Board {
         let safe_cells = self.width * self.height - self.mine_count;
 
         revealed_cells == safe_cells
+    }
+}
+
+impl std::fmt::Debug for Board {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Seed: {}", self.seed)?;
+        writeln!(f, "State View ---------")?;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let cell = &self.state_grid[y * self.width + x];
+
+                match cell {
+                    CellState::Hidden => write!(f, " X ")?,
+                    CellState::Revealed(cc) => match cc {
+                        CellContent::Empty => write!(f, "   ")?,
+                        CellContent::Number(n) => write!(f, " {} ", n)?,
+                        CellContent::Mine => write!(f, " * ")?,
+                    },
+                    CellState::Flagged => write!(f, " ~ ")?,
+                }
+            }
+            writeln!(f)?;
+        }
+
+        writeln!(f, "Content View ---------")?;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let cell = &self.content_grid[y * self.width + x];
+
+                match cell {
+                    CellContent::Empty => write!(f, "   ")?,
+                    CellContent::Number(n) => write!(f, " {} ", n)?,
+                    CellContent::Mine => write!(f, " * ")?,
+                }
+            }
+            writeln!(f)?;
+        }
+        Ok(())
     }
 }

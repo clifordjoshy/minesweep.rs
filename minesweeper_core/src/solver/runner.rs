@@ -1,22 +1,22 @@
 use super::cases::*;
 use crate::board::{Board, CellState};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Default)]
 pub struct NeighbourInfo {
-    pub hidden: Vec<usize>,
+    pub hidden: HashSet<usize>,
     pub flagged_count: u8,
-    pub revealed_count: u8,
+    pub revealed: HashSet<usize>,
 }
 
 pub fn neighbour_counts(board: &Board, idx: usize) -> NeighbourInfo {
     let mut neighbour_info = NeighbourInfo::default();
 
-    for nidx in Board::neighbour_iter(idx, board.width, board.height) {
+    for nidx in board.neighbours_of(idx) {
         match board.state_grid[nidx] {
-            CellState::Hidden => neighbour_info.hidden.push(nidx),
+            CellState::Hidden => _ = neighbour_info.hidden.insert(nidx),
             CellState::Flagged => neighbour_info.flagged_count += 1,
-            CellState::Revealed(_) => neighbour_info.revealed_count += 1,
+            CellState::Revealed(_) => _ = neighbour_info.revealed.insert(nidx),
         }
     }
 
@@ -28,7 +28,7 @@ pub enum SolverResult {
     Solved,
 }
 
-const CASE_CHECKS: [CaseHandler; 1] = [handle_count_match_case];
+const CASE_CHECKS: [CaseHandler; 2] = [handle_count_match_case, handle_neighbour_constraining_case];
 
 pub fn solve_board(board: &Board) -> SolverResult {
     let mut board = board.clone();
@@ -74,7 +74,7 @@ pub fn solve_board(board: &Board) -> SolverResult {
                 relevant_queue.extend(
                     modified_indices
                         .iter()
-                        .flat_map(|&i| Board::neighbour_iter(i, board.width, board.height)),
+                        .flat_map(|&i| board.neighbours_of(i)),
                 );
                 continue 'outer;
             }
