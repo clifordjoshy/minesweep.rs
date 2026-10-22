@@ -47,12 +47,14 @@ pub fn handle_count_match_case(
 
 /// Handles cases where a particular revealed cell is constrained by a revealed
 /// neighbour. This allows us to flag the cell not affected by the constraining
-/// neighbour. Or the opposite.
+/// neighbour. Or open cells if the constraining neighbours guarantee it isn't
+/// a mine. For a given revealed cell, it's hidden neighbours can be *directly*
+/// affected by depth 2 neighbours (see third example below).
 ///
 /// ```text
-///  ?   ?   ?          F   ?   ?   ?
-///  0  (2) (1)         0  (2) (1)  ?
-///  0   0   0          0   0   0   ?
+///  ?   ?   ?    |   F   ?   ?   ?   |   (1) ?
+///  0  (2) (1)   |   0  (2) (1)  ?   |       ? (2)
+///  0   0   0    |   0   0   0   ?   |       ?
 /// ```
 ///
 /// Returns the indices that were newly flagged/opened, or `None` if the rule
@@ -79,7 +81,12 @@ pub fn handle_neighbour_constraining_case(
     let mut mines_left_max_possible = num_mines_in_cur_region;
     let mut mines_left_min_guaranteed = num_mines_in_cur_region;
 
-    for &nidx in &neighbour_info.revealed {
+    let affecting_neighbours = board
+        .neighbours_of(idx)
+        .flat_map(|nidx| board.neighbours_of(nidx))
+        .filter(|&i| matches!(board.state(i).unwrap(), CellState::Revealed(_)));
+
+    for nidx in affecting_neighbours {
         let CellState::Revealed(CellContent::Number(neighbour_num)) = board.state(nidx).unwrap()
         else {
             continue;
