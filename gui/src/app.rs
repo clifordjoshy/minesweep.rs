@@ -67,25 +67,27 @@ impl App {
         if self.status != GameStatus::Playing {
             return; // can't flag before the board exists, or after the game ended
         }
-        if let Some(board) = &mut self.board {
-            let _ = board.toggle_cell_flag(idx);
-        }
+        let Some(board) = &mut self.board else {
+            return;
+        };
+
+        match board.state(idx).unwrap() {
+            CellState::Flagged => board.unflag_cell(idx).unwrap(),
+            CellState::Hidden => board.flag_cell(idx).unwrap(),
+            _ => {}
+        };
     }
 
     /// Mines minus flags placed (can go negative if the player over-flags).
     pub fn mines_remaining(&self) -> isize {
-        let (_, _, mines) = self.difficulty.params();
-        let flags = self.board.as_ref().map_or(0, |b| {
-            b.state_grid
-                .iter()
-                .filter(|s| matches!(s, CellState::Flagged))
-                .count()
-        });
-        mines as isize - flags as isize
+        self.board.as_ref().map_or(0, |b| b.mines_remaining())
     }
 
-    /// Mines minus flags placed (can go negative if the player over-flags).
     pub fn get_seed(&self) -> u64 {
         self.board.as_ref().map_or(0, |b| b.seed)
+    }
+
+    pub fn get_start(&self) -> usize {
+        self.board.as_ref().map_or(0, |b| b.start_idx)
     }
 }

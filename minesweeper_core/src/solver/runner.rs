@@ -13,7 +13,7 @@ pub fn neighbour_counts(board: &Board, idx: usize) -> NeighbourInfo {
     let mut neighbour_info = NeighbourInfo::default();
 
     for nidx in board.neighbours_of(idx) {
-        match board.state_grid[nidx] {
+        match board.state(nidx).unwrap() {
             CellState::Hidden => _ = neighbour_info.hidden.insert(nidx),
             CellState::Flagged => neighbour_info.flagged_count += 1,
             CellState::Revealed(_) => _ = neighbour_info.revealed.insert(nidx),
@@ -25,7 +25,7 @@ pub fn neighbour_counts(board: &Board, idx: usize) -> NeighbourInfo {
 
 pub enum SolverResult {
     Unsolvable(Board),
-    Solved,
+    Solved(Board),
 }
 
 const CASE_CHECKS: [CaseHandler; 2] = [handle_count_match_case, handle_neighbour_constraining_case];
@@ -47,7 +47,7 @@ pub fn solve_board(board: &Board) -> SolverResult {
         if steps_without_progress == board_size {
             return SolverResult::Unsolvable(board);
         } else if board.is_won() {
-            return SolverResult::Solved;
+            return SolverResult::Solved(board);
         }
 
         if let Some(i) = relevant_queue.pop_front() {
@@ -58,7 +58,7 @@ pub fn solve_board(board: &Board) -> SolverResult {
             steps_without_progress += 1;
         }
 
-        if !matches!(board.state_grid[process_index], CellState::Revealed(_)) {
+        if !matches!(board.state(process_index).unwrap(), CellState::Revealed(_)) {
             continue;
         }
 

@@ -24,13 +24,13 @@ pub fn handle_count_match_case(
     idx: usize,
     neighbour_info: &NeighbourInfo,
 ) -> Option<Vec<usize>> {
-    let CellState::Revealed(CellContent::Number(cell_number)) = board.state_grid[idx] else {
+    let CellState::Revealed(CellContent::Number(cell_number)) = board.state(idx).unwrap() else {
         return None;
     };
 
     if (neighbour_info.hidden.len() as u8) + neighbour_info.flagged_count == cell_number {
         for &cidx in &neighbour_info.hidden {
-            board.toggle_cell_flag(cidx).unwrap();
+            board.flag_cell(cidx).unwrap();
         }
     } else if neighbour_info.flagged_count == cell_number {
         for &cidx in &neighbour_info.hidden {
@@ -62,7 +62,7 @@ pub fn handle_neighbour_constraining_case(
     idx: usize,
     neighbour_info: &NeighbourInfo,
 ) -> Option<Vec<usize>> {
-    let CellState::Revealed(CellContent::Number(current_cell_number)) = board.state_grid[idx]
+    let CellState::Revealed(CellContent::Number(current_cell_number)) = board.state(idx).unwrap()
     else {
         return None;
     };
@@ -80,7 +80,8 @@ pub fn handle_neighbour_constraining_case(
     let mut mines_left_min_guaranteed = num_mines_in_cur_region;
 
     for &nidx in &neighbour_info.revealed {
-        let CellState::Revealed(CellContent::Number(neighbour_num)) = board.state_grid[nidx] else {
+        let CellState::Revealed(CellContent::Number(neighbour_num)) = board.state(nidx).unwrap()
+        else {
             continue;
         };
 
@@ -149,7 +150,7 @@ pub fn handle_neighbour_constraining_case(
     }
 
     for &i in definitely_mines.iter() {
-        board.toggle_cell_flag(i).unwrap();
+        board.flag_cell(i).unwrap();
     }
     for &i in definitely_not_mines.iter() {
         let open_res = board.open_cell(i).unwrap();

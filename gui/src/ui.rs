@@ -138,7 +138,7 @@ impl eframe::App for app::App {
 
                 // Before the first click there is no board, so everything is hidden.
                 let state = match &self.board {
-                    Some(board) => board.state_grid[idx],
+                    Some(board) => board.state(idx).unwrap(),
                     None => CellState::Hidden,
                 };
 
@@ -152,7 +152,11 @@ impl eframe::App for app::App {
             }
 
             ui.horizontal(|ui| {
-                ui.label(format!("Seed: {}", self.get_seed()));
+                ui.label(format!(
+                    "Seed: {}, Start: {}",
+                    self.get_seed(),
+                    self.get_start()
+                ));
                 ui.separator();
                 ui.label(self.status.label());
             });

@@ -23,7 +23,8 @@ pub struct Board {
     pub height: usize,
     pub mine_count: usize,
     pub seed: u64,
-    pub state_grid: Box<[CellState]>,
+    pub start_idx: usize,
+    state_grid: Box<[CellState]>,
     content_grid: Box<[CellContent]>,
 }
 
@@ -36,7 +37,7 @@ pub enum BoardError {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BoardCellOpenResult {
     Noop,
-    RevealedNum,
+    RevealedCell,
     MineExploded,
     AllMinesSweeped,
 }
@@ -80,10 +81,11 @@ impl Board {
         start_idx: usize,
         seed: u64,
     ) -> Result<Self, BoardError> {
-        let total_cells = width.strict_mul(height);
-        if mine_count == 0 || mine_count >= total_cells - 8 {
+        let total_cells = width * height;
+
+        if mine_count == 0 || mine_count >= total_cells.saturating_sub(8) {
             return Err(BoardError::MineCountValidationError {
-                min_mines: 0,
+                min_mines: 1,
                 max_mines: total_cells - 8, // technically should be total - neighbours, but good enough
             });
         }
@@ -95,6 +97,7 @@ impl Board {
             width,
             height,
             mine_count,
+            start_idx,
             seed,
             state_grid: vec![CellState::default(); width * height].into_boxed_slice(),
             content_grid: vec![CellContent::default(); width * height].into_boxed_slice(),
@@ -132,23 +135,19 @@ impl Board {
     }
 
     pub fn open_cell(&mut self, open_idx: usize) -> Result<BoardCellOpenResult, BoardError> {
-        if open_idx >= self.state_grid.len() {
-            return Err(BoardError::InvalidPosition);
-        }
-
-        let mut result = match self.state_grid[open_idx] {
+        let mut result = match self.state(open_idx)? {
             CellState::Hidden => {
                 let content = self.content_grid[open_idx];
                 self.state_grid[open_idx] = CellState::Revealed(content);
 
                 match content {
                     CellContent::Mine => BoardCellOpenResult::MineExploded,
-                    CellContent::Number(_) => BoardCellOpenResult::RevealedNum,
+                    CellContent::Number(_) => BoardCellOpenResult::RevealedCell,
                     CellContent::Empty => {
                         // open all hidden neighbours
-                        let mut open_res = BoardCellOpenResult::Noop;
+                        let mut open_res = BoardCellOpenResult::RevealedCell;
                         for nidx in self.neighbours_of(open_idx) {
-                            if self.state_grid[nidx] != CellState::Hidden {
+                            if self.state(nidx).unwrap() != CellState::Hidden {
                                 continue;
                             }
                             open_res = std::cmp::max(self.open_cell(nidx).unwrap(), open_res);
@@ -157,10 +156,8 @@ impl Board {
                     }
                 }
             }
-            CellState::Flagged => BoardCellOpenResult::Noop,
             CellState::Revealed(CellContent::Number(nearby_mines)) => {
                 // open all neighbours that can be opened given current markings aka chording
-
                 let marked_mines = self
                     .neighbours_of(open_idx)
                     .map(|nidx| (self.state_grid[nidx] == CellState::Flagged) as u8)
@@ -169,7 +166,7 @@ impl Board {
                 let mut open_res = BoardCellOpenResult::Noop;
                 if nearby_mines == marked_mines {
                     for nidx in self.neighbours_of(open_idx) {
-                        if self.state_grid[nidx] != CellState::Hidden {
+                        if self.state(nidx).unwrap() != CellState::Hidden {
                             continue;
                         }
                         open_res = std::cmp::max(self.open_cell(nidx).unwrap(), open_res);
@@ -182,7 +179,7 @@ impl Board {
             _ => unreachable!("A user shouldn't be able to open any revealed non-number cell."),
         };
 
-        if result == BoardCellOpenResult::RevealedNum && self.is_won() {
+        if result == BoardCellOpenResult::RevealedCell && self.is_won() {
             // mark any pending cells as flagged
             for i in 0..self.state_grid.len() {
                 if self.state_grid[i] == CellState::Hidden {
@@ -191,39 +188,31 @@ impl Board {
             }
             result = BoardCellOpenResult::AllMinesSweeped;
         }
-        // else if result == BoardCellOpenResult::MineExploded {
-        // reveal all mines
-        // for i in 0..self.state_grid.len() {
-        //     if self.content_grid[i] == CellContent::Mine
-        //         && self.state_grid[i] == CellState::Hidden
-        //     {
-        //         self.state_grid[i] = CellState::Revealed(CellContent::Mine);
-        //     }
-        // }
-        // }
 
         Ok(result)
     }
 
-    pub fn toggle_cell_flag(&mut self, flag_idx: usize) -> Result<(), BoardError> {
-        if flag_idx >= self.state_grid.len() {
+    pub fn flag_cell(&mut self, flag_idx: usize) -> Result<(), BoardError> {
+        if matches!(self.state(flag_idx)?, CellState::Revealed(_)) {
             return Err(BoardError::InvalidPosition);
         }
 
-        match self.state_grid[flag_idx] {
-            CellState::Revealed(_) => {}
-            CellState::Hidden => {
-                self.state_grid[flag_idx] = CellState::Flagged;
-            }
-            CellState::Flagged => {
-                self.state_grid[flag_idx] = CellState::Hidden;
-            }
-        }
+        self.state_grid[flag_idx] = CellState::Flagged;
 
         Ok(())
     }
 
-    pub fn is_won(&mut self) -> bool {
+    pub fn unflag_cell(&mut self, flag_idx: usize) -> Result<(), BoardError> {
+        if matches!(self.state(flag_idx)?, CellState::Revealed(_)) {
+            return Err(BoardError::InvalidPosition);
+        }
+
+        self.state_grid[flag_idx] = CellState::Hidden;
+
+        Ok(())
+    }
+
+    pub fn is_won(&self) -> bool {
         let revealed_cells = self
             .state_grid
             .iter()
@@ -233,6 +222,22 @@ impl Board {
         let safe_cells = self.width * self.height - self.mine_count;
 
         revealed_cells == safe_cells
+    }
+
+    pub fn mines_remaining(&self) -> isize {
+        let flagged = self
+            .state_grid
+            .iter()
+            .filter(|s| matches!(s, CellState::Flagged))
+            .count();
+        self.mine_count as isize - flagged as isize
+    }
+
+    pub fn state(&self, idx: usize) -> Result<CellState, BoardError> {
+        if idx >= self.state_grid.len() {
+            return Err(BoardError::InvalidPosition);
+        }
+        Ok(self.state_grid[idx])
     }
 }
 
