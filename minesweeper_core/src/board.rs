@@ -292,10 +292,6 @@ impl Board {
         }
         Ok(self.state_grid[idx])
     }
-
-    pub fn state_iter(&self) -> impl Iterator<Item = (usize, &CellState)> {
-        self.state_grid.iter().enumerate()
-    }
 }
 
 impl std::fmt::Debug for Board {
