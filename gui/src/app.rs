@@ -1,4 +1,4 @@
-use minesweeper_core::{Board, BoardCellOpenResult, CellState};
+use minesweeper_core::{Board, BoardCellOpenResult, CellContent, CellState};
 
 use crate::config::{Difficulty, GameStatus};
 
@@ -43,15 +43,7 @@ impl App {
             return;
         }
 
-        if let Some(board) = &mut self.board {
-            if let Ok(result) = board.open_cell(idx) {
-                if result == BoardCellOpenResult::MineExploded {
-                    self.status = GameStatus::Lost;
-                } else if result == BoardCellOpenResult::AllMinesSweeped {
-                    self.status = GameStatus::Won;
-                }
-            }
-        } else {
+        let Some(board) = &mut self.board else {
             // First click: generate the board around the clicked cell.
             let (w, h, mines) = self.difficulty.params();
             let Ok(board) = Board::new(w, h, mines, idx) else {
@@ -59,6 +51,21 @@ impl App {
             };
             self.board = Some(board);
             self.status = GameStatus::Playing;
+            return;
+        };
+
+        let open_res = match board.state(idx).unwrap() {
+            CellState::Flagged => Ok(BoardCellOpenResult::Noop),
+            CellState::Revealed(_) => board.chord_open_cell(idx),
+            CellState::Hidden => board.open_cell(idx),
+        };
+
+        if let Ok(result) = open_res {
+            if result == BoardCellOpenResult::MineExploded {
+                self.status = GameStatus::Lost;
+            } else if result == BoardCellOpenResult::AllMinesSweeped {
+                self.status = GameStatus::Won;
+            }
         }
     }
 
@@ -71,16 +78,33 @@ impl App {
             return;
         };
 
-        match board.state(idx).unwrap() {
-            CellState::Flagged => board.unflag_cell(idx).unwrap(),
-            CellState::Hidden => board.flag_cell(idx).unwrap(),
-            _ => {}
+        let _ = match board.state(idx).unwrap() {
+            CellState::Flagged => board.unflag_cell(idx),
+            CellState::Hidden => board.flag_cell(idx),
+            _ => Ok(()),
         };
     }
 
     /// Mines minus flags placed (can go negative if the player over-flags).
     pub fn mines_remaining(&self) -> isize {
         self.board.as_ref().map_or(0, |b| b.mines_remaining())
+    }
+
+    /// whether a cell has more mines marked around it than the actual num
+    pub fn is_cell_incorrectly_marked(&self, idx: usize) -> bool {
+        let Some(board) = &self.board else {
+            return false;
+        };
+
+        let CellState::Revealed(CellContent::Number(cell_num)) = board.state(idx).unwrap() else {
+            return false;
+        };
+
+        board
+            .neighbours_of(idx)
+            .filter(|&nidx| board.state(nidx).unwrap() == CellState::Flagged)
+            .count() as u8
+            > cell_num
     }
 
     pub fn get_seed(&self) -> u64 {

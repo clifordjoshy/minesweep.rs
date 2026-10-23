@@ -18,7 +18,13 @@ fn number_color(n: u8) -> Color32 {
 }
 
 /// Paint a single cell: background colour plus an optional glyph.
-fn paint_cell(ui: &egui::Ui, rect: Rect, state: CellState, hovered: bool) {
+fn paint_cell(
+    ui: &egui::Ui,
+    rect: Rect,
+    state: CellState,
+    incorrectly_marked: bool,
+    hovered: bool,
+) {
     let painter = ui.painter();
 
     let (bg, glyph): (Color32, Option<(String, Color32)>) = match state {
@@ -38,6 +44,10 @@ fn paint_cell(ui: &egui::Ui, rect: Rect, state: CellState, hovered: bool) {
             let revealed_bg = Color32::from_gray(210);
             match content {
                 CellContent::Empty => (revealed_bg, None),
+                CellContent::Number(n) if incorrectly_marked => (
+                    Color32::from_rgb(255, 195, 195),
+                    Some((n.to_string(), number_color(n))),
+                ),
                 CellContent::Number(n) => (revealed_bg, Some((n.to_string(), number_color(n)))),
                 CellContent::Mine => (
                     Color32::from_rgb(200, 60, 60),
@@ -142,7 +152,15 @@ impl eframe::App for app::App {
                     None => CellState::Hidden,
                 };
 
-                paint_cell(ui, cell_rect, state, response.hovered());
+                let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
+
+                paint_cell(
+                    ui,
+                    cell_rect,
+                    state,
+                    is_incorrectly_marked,
+                    response.hovered(),
+                );
 
                 if response.clicked() {
                     self.on_cell_click(idx);

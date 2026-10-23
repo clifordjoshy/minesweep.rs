@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use rand::prelude::{SeedableRng, SliceRandom, StdRng};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -40,7 +42,7 @@ pub enum BoardCellOpenResult {
     /// revealed the requested index only
     Revealed,
     /// revealed other indices than (along with) the requested one
-    RevealedOther(Vec<usize>),
+    RevealedOther(HashSet<usize>),
     MineExploded,
     AllMinesSweeped,
 }
@@ -154,88 +156,41 @@ impl Board {
     }
 
     pub fn open_cell(&mut self, open_idx: usize) -> Result<BoardCellOpenResult, BoardError> {
-        let mut result = match self.state(open_idx)? {
-            CellState::Hidden => {
-                let content = self.content_grid[open_idx];
-                self.state_grid[open_idx] = CellState::Revealed(content);
+        if self.state(open_idx)? != CellState::Hidden {
+            return Ok(BoardCellOpenResult::Noop);
+        }
 
-                match content {
-                    CellContent::Mine => BoardCellOpenResult::MineExploded,
-                    CellContent::Number(_) => BoardCellOpenResult::Revealed,
-                    CellContent::Empty => {
-                        // open all hidden neighbours (flood fill)
+        let content = self.content_grid[open_idx];
+        self.state_grid[open_idx] = CellState::Revealed(content);
 
-                        let mut all_cells_to_open = vec![open_idx];
-                        let mut iter_idx = 0;
+        let mut result = match content {
+            CellContent::Mine => BoardCellOpenResult::MineExploded,
+            CellContent::Number(_) => BoardCellOpenResult::Revealed,
+            CellContent::Empty => {
+                // open all hidden neighbours (flood fill)
 
-                        while iter_idx < all_cells_to_open.len() {
-                            let i = all_cells_to_open[iter_idx];
-                            iter_idx += 1;
+                let mut all_cells_to_open = vec![open_idx];
+                let mut cells_opened = HashSet::<usize>::new();
 
-                            let content = self.content_grid[i];
-                            self.state_grid[i] = CellState::Revealed(content);
+                while let Some(i) = all_cells_to_open.pop() {
+                    let content = self.content_grid[i];
+                    self.state_grid[i] = CellState::Revealed(content);
+                    cells_opened.insert(i);
 
-                            if content != CellContent::Empty {
-                                continue;
-                            }
-
-                            for n in self.neighbours_of(i) {
-                                if self.state_grid[n] == CellState::Hidden
-                                    && !all_cells_to_open.contains(&n)
-                                {
-                                    all_cells_to_open.push(n);
-                                }
-                            }
-                        }
-
-                        BoardCellOpenResult::RevealedOther(all_cells_to_open)
+                    if content != CellContent::Empty {
+                        continue;
                     }
+
+                    all_cells_to_open.extend(self.neighbours_of(i).filter(|&n| {
+                        self.state_grid[n] == CellState::Hidden && !cells_opened.contains(&n)
+                    }));
                 }
+
+                BoardCellOpenResult::RevealedOther(cells_opened)
             }
-            CellState::Revealed(CellContent::Number(nearby_mines)) => {
-                // open all neighbours that can be opened given current markings (chording)
-                let marked_mines = self
-                    .neighbours_of(open_idx)
-                    .filter(|&nidx| self.state_grid[nidx] == CellState::Flagged)
-                    .count() as u8;
-
-                if nearby_mines != marked_mines {
-                    BoardCellOpenResult::Noop
-                } else {
-                    let mut cells_opened = Vec::<usize>::new();
-                    let mut open_res = BoardCellOpenResult::Noop;
-
-                    for nidx in self.neighbours_of(open_idx) {
-                        if self.state_grid[nidx] != CellState::Hidden
-                            || cells_opened.contains(&nidx)
-                        {
-                            continue;
-                        }
-                        let nopen_res = self.open_cell(nidx).unwrap();
-                        if nopen_res.is_end_condition() {
-                            open_res = nopen_res;
-                            break;
-                        } else if nopen_res == BoardCellOpenResult::Revealed {
-                            cells_opened.push(nidx);
-                        } else if let BoardCellOpenResult::RevealedOther(cv) = nopen_res {
-                            cells_opened.extend(cv);
-                        }
-                    }
-
-                    if open_res.is_end_condition() {
-                        open_res
-                    } else if !cells_opened.is_empty() {
-                        BoardCellOpenResult::RevealedOther(cells_opened)
-                    } else {
-                        BoardCellOpenResult::Noop
-                    }
-                }
-            }
-            CellState::Revealed(CellContent::Empty) => BoardCellOpenResult::Noop,
-            _ => unreachable!("A user shouldn't be able to open any revealed non-number cell."),
         };
 
-        if !result.is_end_condition() && self.is_won() {
+        if result.is_new_information() && self.is_won() {
             // mark any pending cells as flagged
             for i in 0..self.state_grid.len() {
                 if self.state_grid[i] == CellState::Hidden {
@@ -246,6 +201,48 @@ impl Board {
         }
 
         Ok(result)
+    }
+
+    pub fn chord_open_cell(&mut self, open_idx: usize) -> Result<BoardCellOpenResult, BoardError> {
+        let CellState::Revealed(CellContent::Number(nearby_mines)) = self.state(open_idx)? else {
+            return Ok(BoardCellOpenResult::Noop);
+        };
+
+        // open all neighbours that can be opened given current markings (chording)
+        let marked_mines = self
+            .neighbours_of(open_idx)
+            .filter(|&nidx| self.state_grid[nidx] == CellState::Flagged)
+            .count() as u8;
+
+        if nearby_mines != marked_mines {
+            return Ok(BoardCellOpenResult::Noop);
+        }
+
+        let mut cells_opened = HashSet::<usize>::new();
+        let mut open_res = BoardCellOpenResult::Noop;
+
+        for nidx in self.neighbours_of(open_idx) {
+            if self.state_grid[nidx] != CellState::Hidden || cells_opened.contains(&nidx) {
+                continue;
+            }
+            let nopen_res = self.open_cell(nidx).unwrap();
+            if nopen_res.is_end_condition() {
+                open_res = nopen_res;
+                break;
+            } else if nopen_res == BoardCellOpenResult::Revealed {
+                cells_opened.insert(nidx);
+            } else if let BoardCellOpenResult::RevealedOther(cv) = nopen_res {
+                cells_opened.extend(cv);
+            }
+        }
+
+        Ok(if open_res.is_end_condition() {
+            open_res
+        } else if !cells_opened.is_empty() {
+            BoardCellOpenResult::RevealedOther(cells_opened)
+        } else {
+            BoardCellOpenResult::Noop
+        })
     }
 
     pub fn flag_cell(&mut self, flag_idx: usize) -> Result<(), BoardError> {

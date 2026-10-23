@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use super::NeighbourInfo;
 use crate::{
@@ -57,7 +57,7 @@ pub fn handle_count_match_case(
 /// Handles cases where a particular revealed cell is constrained by a revealed
 /// neighbour. This allows us to flag the cell not affected by the constraining
 /// neighbour. Or open cells if the constraining neighbours guarantee it isn't
-/// a mine. For a given revealed cell, it's hidden neighbours can be *directly*
+/// a mine. For a given revealed cell, its hidden neighbours can be *directly*
 /// affected by depth 2 neighbours (see third example below).
 ///
 /// ```text
@@ -79,7 +79,7 @@ pub fn handle_neighbour_constraining_case(
     };
 
     let cur_region = &neighbour_info.hidden;
-    let num_mines_in_cur_region = current_cell_number - neighbour_info.flagged_count;
+    let num_mines_in_cur_region = current_cell_number.checked_sub(neighbour_info.flagged_count)?;
 
     let mut definitely_mines = HashSet::<usize>::new();
     let mut definitely_not_mines = HashSet::<usize>::new();
@@ -93,9 +93,10 @@ pub fn handle_neighbour_constraining_case(
     let affecting_neighbours = board
         .neighbours_of(idx)
         .flat_map(|nidx| board.neighbours_of(nidx))
-        .filter(|&i| matches!(board.state(i).unwrap(), CellState::Revealed(_)));
+        .filter(|&nidx| nidx != idx)
+        .collect::<BTreeSet<_>>();
 
-    for nidx in affecting_neighbours {
+    for nidx in affecting_neighbours.into_iter() {
         let CellState::Revealed(CellContent::Number(neighbour_num)) = board.state(nidx).unwrap()
         else {
             continue;
@@ -103,7 +104,7 @@ pub fn handle_neighbour_constraining_case(
 
         let ncounts = neighbour_counts(board, nidx);
         let nbr_region = &ncounts.hidden;
-        let num_mines_in_nbr_region = neighbour_num - ncounts.flagged_count;
+        let num_mines_in_nbr_region = neighbour_num.checked_sub(ncounts.flagged_count)?;
 
         let cur_intersection_nbr = cur_region
             .intersection(nbr_region)
