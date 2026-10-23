@@ -28,21 +28,30 @@ pub fn handle_count_match_case(
         return None;
     };
 
+    let mut modified_indices = Vec::<usize>::new();
+
     if (neighbour_info.hidden.len() as u8) + neighbour_info.flagged_count == cell_number {
         for &cidx in &neighbour_info.hidden {
             board.flag_cell(cidx).unwrap();
+            modified_indices.push(cidx);
         }
     } else if neighbour_info.flagged_count == cell_number {
         for &cidx in &neighbour_info.hidden {
             let open_res = board.open_cell(cidx).unwrap();
             // sanity check
             assert_ne!(open_res, BoardCellOpenResult::MineExploded);
+
+            if let BoardCellOpenResult::RevealedOther(idxs) = open_res {
+                modified_indices.extend(idxs);
+            } else if open_res == BoardCellOpenResult::Revealed {
+                modified_indices.push(cidx);
+            }
         }
     } else {
         return None;
     }
 
-    Some(neighbour_info.hidden.iter().copied().collect::<Vec<_>>())
+    Some(modified_indices)
 }
 
 /// Handles cases where a particular revealed cell is constrained by a revealed
@@ -156,19 +165,25 @@ pub fn handle_neighbour_constraining_case(
         return None;
     }
 
+    let mut modified_indices = Vec::<usize>::new();
+
     for &i in definitely_mines.iter() {
         board.flag_cell(i).unwrap();
     }
+
+    modified_indices.extend(definitely_mines);
+
     for &i in definitely_not_mines.iter() {
         let open_res = board.open_cell(i).unwrap();
         // sanity check
         assert_ne!(open_res, BoardCellOpenResult::MineExploded);
+
+        if let BoardCellOpenResult::RevealedOther(idxs) = open_res {
+            modified_indices.extend(idxs);
+        }
     }
 
-    let modified_indices = definitely_mines
-        .into_iter()
-        .chain(definitely_not_mines)
-        .collect();
+    modified_indices.extend(definitely_not_mines);
 
     Some(modified_indices)
 }

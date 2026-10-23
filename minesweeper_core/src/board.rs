@@ -34,12 +34,31 @@ pub enum BoardError {
     InvalidPosition,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum BoardCellOpenResult {
     Noop,
-    RevealedCell,
+    /// revealed the requested index only
+    Revealed,
+    /// revealed other indices than (along with) the requested one
+    RevealedOther(Vec<usize>),
     MineExploded,
     AllMinesSweeped,
+}
+
+impl BoardCellOpenResult {
+    pub fn is_end_condition(&self) -> bool {
+        matches!(
+            self,
+            BoardCellOpenResult::MineExploded | BoardCellOpenResult::AllMinesSweeped
+        )
+    }
+
+    pub fn is_new_information(&self) -> bool {
+        matches!(
+            self,
+            BoardCellOpenResult::Revealed | BoardCellOpenResult::RevealedOther(_)
+        )
+    }
 }
 
 impl Board {
@@ -142,44 +161,81 @@ impl Board {
 
                 match content {
                     CellContent::Mine => BoardCellOpenResult::MineExploded,
-                    CellContent::Number(_) => BoardCellOpenResult::RevealedCell,
+                    CellContent::Number(_) => BoardCellOpenResult::Revealed,
                     CellContent::Empty => {
-                        // open all hidden neighbours
-                        let mut open_res = BoardCellOpenResult::RevealedCell;
-                        for nidx in self.neighbours_of(open_idx) {
-                            if self.state(nidx).unwrap() != CellState::Hidden {
+                        // open all hidden neighbours (flood fill)
+
+                        let mut all_cells_to_open = vec![open_idx];
+                        let mut iter_idx = 0;
+
+                        while iter_idx < all_cells_to_open.len() {
+                            let i = all_cells_to_open[iter_idx];
+                            iter_idx += 1;
+
+                            let content = self.content_grid[i];
+                            self.state_grid[i] = CellState::Revealed(content);
+
+                            if content != CellContent::Empty {
                                 continue;
                             }
-                            open_res = std::cmp::max(self.open_cell(nidx).unwrap(), open_res);
+
+                            for n in self.neighbours_of(i) {
+                                if self.state_grid[n] == CellState::Hidden
+                                    && !all_cells_to_open.contains(&n)
+                                {
+                                    all_cells_to_open.push(n);
+                                }
+                            }
                         }
-                        open_res
+
+                        BoardCellOpenResult::RevealedOther(all_cells_to_open)
                     }
                 }
             }
             CellState::Revealed(CellContent::Number(nearby_mines)) => {
-                // open all neighbours that can be opened given current markings aka chording
+                // open all neighbours that can be opened given current markings (chording)
                 let marked_mines = self
                     .neighbours_of(open_idx)
-                    .map(|nidx| (self.state_grid[nidx] == CellState::Flagged) as u8)
-                    .sum::<u8>();
+                    .filter(|&nidx| self.state_grid[nidx] == CellState::Flagged)
+                    .count() as u8;
 
-                let mut open_res = BoardCellOpenResult::Noop;
-                if nearby_mines == marked_mines {
+                if nearby_mines != marked_mines {
+                    BoardCellOpenResult::Noop
+                } else {
+                    let mut cells_opened = Vec::<usize>::new();
+                    let mut open_res = BoardCellOpenResult::Noop;
+
                     for nidx in self.neighbours_of(open_idx) {
-                        if self.state(nidx).unwrap() != CellState::Hidden {
+                        if self.state_grid[nidx] != CellState::Hidden
+                            || cells_opened.contains(&nidx)
+                        {
                             continue;
                         }
-                        open_res = std::cmp::max(self.open_cell(nidx).unwrap(), open_res);
+                        let nopen_res = self.open_cell(nidx).unwrap();
+                        if nopen_res.is_end_condition() {
+                            open_res = nopen_res;
+                            break;
+                        } else if nopen_res == BoardCellOpenResult::Revealed {
+                            cells_opened.push(nidx);
+                        } else if let BoardCellOpenResult::RevealedOther(cv) = nopen_res {
+                            cells_opened.extend(cv);
+                        }
+                    }
+
+                    if open_res.is_end_condition() {
+                        open_res
+                    } else if !cells_opened.is_empty() {
+                        BoardCellOpenResult::RevealedOther(cells_opened)
+                    } else {
+                        BoardCellOpenResult::Noop
                     }
                 }
-
-                open_res
             }
             CellState::Revealed(CellContent::Empty) => BoardCellOpenResult::Noop,
             _ => unreachable!("A user shouldn't be able to open any revealed non-number cell."),
         };
 
-        if result == BoardCellOpenResult::RevealedCell && self.is_won() {
+        if !result.is_end_condition() && self.is_won() {
             // mark any pending cells as flagged
             for i in 0..self.state_grid.len() {
                 if self.state_grid[i] == CellState::Hidden {
@@ -238,6 +294,10 @@ impl Board {
             return Err(BoardError::InvalidPosition);
         }
         Ok(self.state_grid[idx])
+    }
+
+    pub fn state_iter(&self) -> impl Iterator<Item = (usize, &CellState)> {
+        self.state_grid.iter().enumerate()
     }
 }
 
