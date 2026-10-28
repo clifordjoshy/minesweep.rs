@@ -31,7 +31,7 @@ pub enum SolverResult {
     Solved,
 }
 
-pub fn solve_board(mut board: &mut Board) -> SolverResult {
+pub fn solve_board(board: &mut Board) -> SolverResult {
     let board_size = board.width * board.height;
 
     // queue of indices that might be relevant (neighbours of any actioned index)
@@ -86,7 +86,7 @@ pub fn solve_board(mut board: &mut Board) -> SolverResult {
 
         // we did a full iteration of the board with no progress on the simple
         // cases. let's try the fallback case and hope for some progress
-        if let Some(modified_indices) = handle_frontier_backtracking_case(&mut board) {
+        if let Some(modified_indices) = handle_frontier_backtracking_case(board) {
             relevant_queue.extend(
                 modified_indices
                     .into_iter()
@@ -287,6 +287,271 @@ fn handle_neighbour_constraining_case(
 ///   don't directly overlap in their neighbourhood.
 /// - Also takes the total mine count into account for end-game deductions.
 pub fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
-    // todo!();
-    return None;
+    let (frontiers, non_frontier) = find_disjoint_frontiers(board);
+
+    let total_mines_remaining = board.mines_remaining().max(0) as usize;
+    let max_mines_per_frontier = total_mines_remaining - frontiers.len() + 1;
+
+    let all_frontiers_size = frontiers.iter().map(|f| f.len()).sum::<usize>();
+
+    // accumulate all constraints in the frontier so that can test quickly
+    let get_constraints = |frontier: &Vec<usize>| {
+        frontier
+            .iter()
+            .flat_map(|&fidx| board.neighbours_of(fidx))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter_map(|nidx| {
+                let CellState::Revealed(CellContent::Number(cell_num)) = board.state(nidx).unwrap()
+                else {
+                    return None;
+                };
+
+                let flagged_count = board
+                    .neighbours_of(nidx)
+                    .filter(|&nnidx| board.state(nnidx).unwrap() == CellState::Flagged)
+                    .count() as u8;
+
+                let mines_needed = cell_num - flagged_count;
+
+                let frontier_neighbour_mask = board
+                    .neighbours_of(nidx)
+                    .filter_map(|nnidx| {
+                        frontier
+                            .iter()
+                            .position(|&f| f == nnidx)
+                            .map(|fidx| 1u128 << fidx)
+                    })
+                    .fold(0u128, |a, b| a | b);
+
+                Some((frontier_neighbour_mask, mines_needed))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let mut definitely_mines = Vec::<usize>::new();
+    let mut definitely_not_mines = Vec::<usize>::new();
+
+    let mut min_mines_guaranteed_in_entire_frontier = 0;
+    let mut max_mines_possible_in_entire_frontier = 0;
+
+    for frontier in frontiers {
+        if frontier.len() > 127 {
+            // we might be able to go higher. this limit is just coming from
+            // the bitmask being u128, but 127 seems like a good enough depth
+
+            max_mines_possible_in_entire_frontier += frontier.len();
+
+            continue;
+        }
+
+        let constraints = get_constraints(&frontier);
+
+        let min_required_mines_in_frontier = total_mines_remaining
+            .saturating_sub(non_frontier.len())
+            .saturating_sub(all_frontiers_size - frontier.len());
+
+        let mut min_guaranteed_mines_in_frontier = frontier.len();
+        let mut max_possible_mines_in_frontier = 0;
+
+        let full_mask = (1u128 << frontier.len()) - 1;
+
+        let mut found_something = false;
+        let mut definitely_mines_bitmask = full_mask;
+        let mut definitely_not_mines_bitmask = full_mask;
+
+        // essentially a depth first search on all possible combinations of
+        // this frontier (using a bitmask to represent entries in the frontier
+        // that's being treated as a mine)
+
+        // we start by adding all children of the 0 (no mines in frontier) case
+        // we know that there must be atleast one mine in this frontier since
+        // we're in this function).
+
+        // the tree looks something like below (if no pruning)
+        //         000
+        //   001   010      100
+        //         011   101   110
+        //                     111
+        //
+        // at the end of the traversal, if one cell is a mine across all possible
+        // solutions, then we flag it. if not a mine across all possible solutions
+        // we open it.
+        // we also track the min and max possible mines across the frontier so that
+        // we can make deductions about the non frontier region.
+
+        let mut mine_bitmask_stack = (0..frontier.len()).map(|i| 1u128 << i).collect::<Vec<_>>();
+
+        'next_bitmask: while let Some(mine_bitmask) = mine_bitmask_stack.pop() {
+            if mine_bitmask.count_ones() as usize > max_mines_per_frontier {
+                continue;
+            }
+
+            // the highest set bit tells us up to how many indexes from frontier
+            // must already be confirmed. if that configuration isn't valid
+            // then no point branching from there.
+            let bits_already_set = mine_bitmask.ilog2();
+            let must_be_fine_mask = (1u128 << (bits_already_set + 1)) - 1;
+            let unchecked_mask = full_mask & !must_be_fine_mask;
+
+            let mut all_constraints_satisfied = true;
+
+            for &(frontier_neighbour_mask, mines_needed) in constraints.iter() {
+                let flagged_in_constraint_region =
+                    (mine_bitmask & frontier_neighbour_mask).count_ones() as u8;
+                let unknown_in_constraint_region =
+                    (frontier_neighbour_mask & unchecked_mask).count_ones() as u8;
+
+                if flagged_in_constraint_region + unknown_in_constraint_region < mines_needed
+                    || flagged_in_constraint_region > mines_needed
+                {
+                    // this configuration doesn't have enough / has too many mines
+                    // in the `must_be_fine_mask` region.
+                    // no point proceeding further with the children of this configuration
+                    continue 'next_bitmask;
+                }
+
+                all_constraints_satisfied =
+                    all_constraints_satisfied && flagged_in_constraint_region == mines_needed
+            }
+
+            if all_constraints_satisfied {
+                if (mine_bitmask & full_mask).count_ones() as usize
+                    >= min_required_mines_in_frontier
+                {
+                    // add this to the list of known solutions
+                    found_something = true;
+                    definitely_mines_bitmask &= mine_bitmask;
+                    definitely_not_mines_bitmask &= full_mask & !mine_bitmask;
+
+                    min_guaranteed_mines_in_frontier = std::cmp::min(
+                        min_guaranteed_mines_in_frontier,
+                        mine_bitmask.count_ones() as usize,
+                    );
+                    max_possible_mines_in_frontier = std::cmp::max(
+                        max_possible_mines_in_frontier,
+                        mine_bitmask.count_ones() as usize,
+                    )
+                }
+
+                continue 'next_bitmask;
+            }
+
+            mine_bitmask_stack.extend(
+                ((bits_already_set as usize + 1)..frontier.len())
+                    .map(|i| mine_bitmask | (1u128 << i)),
+            );
+        }
+
+        if found_something {
+            for (frontier_idx, &board_idx) in frontier.iter().enumerate() {
+                let idx_mask = 1u128 << frontier_idx;
+                if definitely_mines_bitmask & idx_mask != 0 {
+                    definitely_mines.push(board_idx);
+                }
+                if definitely_not_mines_bitmask & idx_mask != 0 {
+                    definitely_not_mines.push(board_idx);
+                }
+            }
+
+            min_mines_guaranteed_in_entire_frontier += min_guaranteed_mines_in_frontier;
+            max_mines_possible_in_entire_frontier += max_possible_mines_in_frontier;
+        } else {
+            max_mines_possible_in_entire_frontier += frontier.len();
+        }
+    }
+
+    if min_mines_guaranteed_in_entire_frontier == total_mines_remaining {
+        definitely_not_mines.extend(non_frontier);
+    } else if max_mines_possible_in_entire_frontier
+        == total_mines_remaining.saturating_sub(non_frontier.len())
+    {
+        definitely_mines.extend(non_frontier);
+    }
+
+    let mut modified_indices = Vec::new();
+
+    for idx in definitely_mines {
+        board.flag_cell(idx).unwrap();
+        modified_indices.push(idx);
+    }
+    for idx in definitely_not_mines {
+        let res = board.open_cell(idx).unwrap();
+        assert_ne!(res, BoardCellOpenResult::MineExploded);
+        if res == BoardCellOpenResult::Revealed {
+            modified_indices.push(idx);
+        } else if let BoardCellOpenResult::RevealedOther(indices) = res {
+            modified_indices.extend(indices);
+        }
+    }
+
+    if modified_indices.is_empty() {
+        None
+    } else {
+        Some(modified_indices)
+    }
+}
+
+/// Helper method to split the board into disjoint sets of hidden cells that
+/// are mutually independent in terms of constraints.
+/// The returned frontier vecs are in traversal order, so that backtracking can
+/// happens with locality
+fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, HashSet<usize>) {
+    let board_size = board.width * board.height;
+
+    let mut frontier_union_set = HashSet::new();
+    let mut nonfrontier_hidden_cells = HashSet::new();
+
+    for idx in (0..board_size).filter(|&i| board.state(i).unwrap() == CellState::Hidden) {
+        let is_in_frontier = board
+            .neighbours_of(idx)
+            .any(|j| matches!(board.state(j).unwrap(), CellState::Revealed(_)));
+
+        if is_in_frontier {
+            frontier_union_set.insert(idx);
+        } else {
+            nonfrontier_hidden_cells.insert(idx);
+        }
+    }
+
+    // --- BFS to split the frontier into disjoint sets
+
+    let mut visited_cells = HashSet::<usize>::new();
+    let mut frontiers = Vec::<Vec<usize>>::new();
+
+    for &i in frontier_union_set.iter() {
+        if visited_cells.contains(&i) {
+            continue;
+        }
+
+        let mut current_frontier = Vec::new();
+        let mut visit_queue = VecDeque::new();
+
+        visit_queue.push_back(i);
+
+        while let Some(current) = visit_queue.pop_front() {
+            if visited_cells.contains(&current) {
+                continue;
+            }
+            current_frontier.push(current);
+            visited_cells.insert(current);
+
+            // find depth-2 neighbours in the frontier separated by a revealed num
+            // i.e (hidden -> revealed num -> hidden)
+            visit_queue.extend(
+                board
+                    .neighbours_of(current)
+                    .filter(|&n| matches!(board.state(n).unwrap(), CellState::Revealed(_)))
+                    .flat_map(|n| board.neighbours_of(n))
+                    .filter(|next_hidden| {
+                        frontier_union_set.contains(next_hidden)
+                            && !visited_cells.contains(next_hidden)
+                    }),
+            )
+        }
+
+        frontiers.push(current_frontier);
+    }
+
+    (frontiers, nonfrontier_hidden_cells)
 }
