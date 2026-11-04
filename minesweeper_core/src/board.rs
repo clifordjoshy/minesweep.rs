@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use rand::prelude::{SeedableRng, SliceRandom, StdRng};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -39,10 +37,7 @@ pub enum BoardError {
 #[derive(Debug, PartialEq, Eq)]
 pub enum BoardCellOpenResult {
     Noop,
-    /// revealed the requested index only
-    Revealed,
-    /// revealed other indices than (along with) the requested one
-    RevealedOther(HashSet<usize>),
+    Revealed(Vec<usize>),
     MineExploded,
     AllMinesSweeped,
 }
@@ -54,22 +49,16 @@ impl BoardCellOpenResult {
             BoardCellOpenResult::MineExploded | BoardCellOpenResult::AllMinesSweeped
         )
     }
-
-    pub fn is_new_information(&self) -> bool {
-        matches!(
-            self,
-            BoardCellOpenResult::Revealed | BoardCellOpenResult::RevealedOther(_)
-        )
-    }
 }
 
 impl Board {
-    pub fn neighbours_of(&self, idx: usize) -> impl Iterator<Item = usize> + use<> {
+    pub fn neighbours_of(&self, idx: usize, radius: u8) -> impl Iterator<Item = usize> + use<> {
         let (width, height) = (self.width, self.height);
         let (x, y) = ((idx % width) as i32, (idx / width) as i32);
 
-        (-1..=1)
-            .flat_map(move |dy| (-1..=1).map(move |dx| (dx, dy)))
+        let r = radius as i32;
+        (-r..=r)
+            .flat_map(move |dy| (-r..=r).map(move |dx| (dx, dy)))
             .filter_map(move |(dx, dy)| {
                 if dx == 0 && dy == 0 {
                     return None;
@@ -125,7 +114,7 @@ impl Board {
         };
 
         let definitely_not_mine_indices = board
-            .neighbours_of(start_idx)
+            .neighbours_of(start_idx, 1)
             .chain(std::iter::once(start_idx))
             .collect::<Vec<_>>();
 
@@ -141,7 +130,7 @@ impl Board {
         for &midx in mine_indices {
             board.content_grid[midx] = CellContent::Mine;
 
-            for nidx in board.neighbours_of(midx) {
+            for nidx in board.neighbours_of(midx, 1) {
                 board.content_grid[nidx] = match board.content_grid[nidx] {
                     CellContent::Empty => CellContent::Number(1),
                     CellContent::Number(c) => CellContent::Number(c + 1),
@@ -165,32 +154,32 @@ impl Board {
 
         let mut result = match content {
             CellContent::Mine => BoardCellOpenResult::MineExploded,
-            CellContent::Number(_) => BoardCellOpenResult::Revealed,
+            CellContent::Number(_) => BoardCellOpenResult::Revealed(vec![open_idx]),
             CellContent::Empty => {
                 // open all hidden neighbours (flood fill)
 
                 let mut all_cells_to_open = vec![open_idx];
-                let mut cells_opened = HashSet::<usize>::new();
+                let mut cells_opened = Vec::<usize>::new();
 
                 while let Some(i) = all_cells_to_open.pop() {
                     let content = self.content_grid[i];
                     self.state_grid[i] = CellState::Revealed(content);
-                    cells_opened.insert(i);
+                    cells_opened.push(i);
 
                     if content != CellContent::Empty {
                         continue;
                     }
 
-                    all_cells_to_open.extend(self.neighbours_of(i).filter(|&n| {
+                    all_cells_to_open.extend(self.neighbours_of(i, 1).filter(|&n| {
                         self.state_grid[n] == CellState::Hidden && !cells_opened.contains(&n)
                     }));
                 }
 
-                BoardCellOpenResult::RevealedOther(cells_opened)
+                BoardCellOpenResult::Revealed(cells_opened)
             }
         };
 
-        if result.is_new_information() && self.is_won() {
+        if matches!(result, BoardCellOpenResult::Revealed(_)) && self.is_won() {
             // mark any pending cells as flagged
             for i in 0..self.state_grid.len() {
                 if self.state_grid[i] == CellState::Hidden {
@@ -210,7 +199,7 @@ impl Board {
 
         // open all neighbours that can be opened given current markings (chording)
         let marked_mines = self
-            .neighbours_of(open_idx)
+            .neighbours_of(open_idx, 1)
             .filter(|&nidx| self.state_grid[nidx] == CellState::Flagged)
             .count() as u8;
 
@@ -218,10 +207,10 @@ impl Board {
             return Ok(BoardCellOpenResult::Noop);
         }
 
-        let mut cells_opened = HashSet::<usize>::new();
+        let mut cells_opened = Vec::<usize>::new();
         let mut open_res = BoardCellOpenResult::Noop;
 
-        for nidx in self.neighbours_of(open_idx) {
+        for nidx in self.neighbours_of(open_idx, 1) {
             if self.state_grid[nidx] != CellState::Hidden || cells_opened.contains(&nidx) {
                 continue;
             }
@@ -229,17 +218,15 @@ impl Board {
             if nopen_res.is_end_condition() {
                 open_res = nopen_res;
                 break;
-            } else if nopen_res == BoardCellOpenResult::Revealed {
-                cells_opened.insert(nidx);
-            } else if let BoardCellOpenResult::RevealedOther(cv) = nopen_res {
-                cells_opened.extend(cv);
+            } else if let BoardCellOpenResult::Revealed(idxs) = nopen_res {
+                cells_opened.extend(idxs);
             }
         }
 
         Ok(if open_res.is_end_condition() {
             open_res
         } else if !cells_opened.is_empty() {
-            BoardCellOpenResult::RevealedOther(cells_opened)
+            BoardCellOpenResult::Revealed(cells_opened)
         } else {
             BoardCellOpenResult::Noop
         })
@@ -291,6 +278,14 @@ impl Board {
             return Err(BoardError::InvalidPosition);
         }
         Ok(self.state_grid[idx])
+    }
+}
+
+impl std::ops::Index<usize> for Board {
+    type Output = CellState;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.state_grid[index]
     }
 }
 

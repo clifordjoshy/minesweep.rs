@@ -2,29 +2,9 @@ use crate::{
     BoardCellOpenResult, CellContent,
     board::{Board, CellState},
     solver::SolverResult::Solved,
+    utils,
 };
-use std::collections::{BTreeSet, HashSet, VecDeque};
-
-#[derive(Debug, Default)]
-pub struct NeighbourInfo {
-    pub hidden: HashSet<usize>,
-    pub flagged_count: u8,
-    pub revealed: HashSet<usize>,
-}
-
-pub fn neighbour_counts(board: &Board, idx: usize) -> NeighbourInfo {
-    let mut neighbour_info = NeighbourInfo::default();
-
-    for nidx in board.neighbours_of(idx) {
-        match board.state(nidx).unwrap() {
-            CellState::Hidden => _ = neighbour_info.hidden.insert(nidx),
-            CellState::Flagged => neighbour_info.flagged_count += 1,
-            CellState::Revealed(_) => _ = neighbour_info.revealed.insert(nidx),
-        }
-    }
-
-    neighbour_info
-}
+use std::collections::{HashSet, VecDeque};
 
 pub enum SolverResult {
     Unsolvable,
@@ -42,26 +22,25 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
         // after a full scan of the table, we try the fallback
         let mut manual_iter_index = 0;
 
-        let mut process_index;
         'check_simple_cases: loop {
-            if manual_iter_index == board_size {
-                break;
-            } else if !relevant_queue.is_empty() {
+            let process_index = if let Some(i) = relevant_queue.pop_front() {
                 // reset manual iter
-                process_index = relevant_queue.pop_front().unwrap();
                 manual_iter_index = 0;
-            } else {
-                process_index = manual_iter_index;
+                i
+            } else if manual_iter_index < board_size {
                 manual_iter_index += 1;
-            }
+                manual_iter_index - 1
+            } else {
+                break;
+            };
 
-            if !matches!(board.state(process_index).unwrap(), CellState::Revealed(_)) {
+            if !matches!(board[process_index], CellState::Revealed(_)) {
                 continue;
             }
 
-            let neighbour_info = neighbour_counts(board, process_index);
+            let neighbour_info = utils::NeighbourInfo::for_cell(board, process_index);
 
-            if neighbour_info.hidden.is_empty() {
+            if neighbour_info.hidden_count() == 0 {
                 continue;
             }
 
@@ -70,10 +49,10 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
                     relevant_queue.extend(
                         modified_indices
                             .into_iter()
-                            .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i)))
+                            .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
                             .collect::<HashSet<_>>()
                             .into_iter()
-                            .filter(|&i| matches!(board.state(i).unwrap(), CellState::Revealed(_))),
+                            .filter(|&i| matches!(board[i], CellState::Revealed(_))),
                     );
                     continue 'check_simple_cases;
                 }
@@ -90,7 +69,7 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
             relevant_queue.extend(
                 modified_indices
                     .into_iter()
-                    .filter(|&i| matches!(board.state(i).unwrap(), CellState::Revealed(_))),
+                    .filter(|&i| matches!(board[i], CellState::Revealed(_))),
             );
             continue 'solve_outer;
         } else {
@@ -113,29 +92,26 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
 fn handle_count_match_case(
     board: &mut Board,
     idx: usize,
-    neighbour_info: &NeighbourInfo,
+    neighbour_info: &utils::NeighbourInfo,
 ) -> Option<Vec<usize>> {
-    let CellState::Revealed(CellContent::Number(cell_number)) = board.state(idx).unwrap() else {
+    let CellState::Revealed(CellContent::Number(cell_number)) = board[idx] else {
         return None;
     };
 
     let mut modified_indices = Vec::<usize>::new();
 
-    if (neighbour_info.hidden.len() as u8) + neighbour_info.flagged_count == cell_number {
-        for &cidx in &neighbour_info.hidden {
+    if neighbour_info.hidden_count() + neighbour_info.flagged_count() == cell_number {
+        for cidx in neighbour_info.hidden(board) {
             board.flag_cell(cidx).unwrap();
             modified_indices.push(cidx);
         }
-    } else if neighbour_info.flagged_count == cell_number {
-        for &cidx in &neighbour_info.hidden {
+    } else if neighbour_info.flagged_count() == cell_number {
+        for cidx in neighbour_info.hidden(board) {
             let open_res = board.open_cell(cidx).unwrap();
-            // sanity check
             assert_ne!(open_res, BoardCellOpenResult::MineExploded);
 
-            if let BoardCellOpenResult::RevealedOther(idxs) = open_res {
+            if let BoardCellOpenResult::Revealed(idxs) = open_res {
                 modified_indices.extend(idxs);
-            } else if open_res == BoardCellOpenResult::Revealed {
-                modified_indices.push(cidx);
             }
         }
     } else {
@@ -162,120 +138,133 @@ fn handle_count_match_case(
 fn handle_neighbour_constraining_case(
     board: &mut Board,
     idx: usize,
-    neighbour_info: &NeighbourInfo,
+    neighbour_info: &utils::NeighbourInfo,
 ) -> Option<Vec<usize>> {
-    let CellState::Revealed(CellContent::Number(current_cell_number)) = board.state(idx).unwrap()
-    else {
+    let CellState::Revealed(CellContent::Number(cur_cell_number)) = board[idx] else {
         return None;
     };
 
-    let cur_region = &neighbour_info.hidden;
-    let num_mines_in_cur_region = current_cell_number.checked_sub(neighbour_info.flagged_count)?;
+    // all operations here will be in the 5x5 square around the `idx` cell
+    // we collect that in advance, and all referenes to region will use an u32
+    // bitmask indicating the index in the below arr (with the LSB being index 0)
+    let mut affecting_neighbours = [usize::MAX; 25];
+    affecting_neighbours[0] = idx;
+    let mut affecting_neighbours_len = 1;
+    for nidx in board.neighbours_of(idx, 2) {
+        affecting_neighbours[affecting_neighbours_len] = nidx;
+        affecting_neighbours_len += 1;
+    }
+    let affecting_neighbours = &affecting_neighbours[0..affecting_neighbours_len];
 
-    let mut definitely_mines = HashSet::<usize>::new();
-    let mut definitely_not_mines = HashSet::<usize>::new();
+    let an_bitmask = |x: usize| {
+        if let Some(an_idx) = affecting_neighbours.iter().position(|&y| x == y) {
+            1u32 << an_idx
+        } else {
+            0
+        }
+    };
+
+    let cur_region = neighbour_info
+        .hidden(board)
+        .map(an_bitmask)
+        .fold(0, |m1, m2| m1 | m2);
+
+    let num_mines_in_cur_region = cur_cell_number.checked_sub(neighbour_info.flagged_count())?;
+
+    let mut definitely_mines = 0u32;
+    let mut definitely_not_mines = 0u32;
 
     // track regions unaffected by constraints
     // for a final deduction from the complement of all constraints
-    let mut region_left = cur_region.clone();
+    let mut cur_region_left = cur_region;
     let mut mines_left_max_possible = num_mines_in_cur_region;
     let mut mines_left_min_guaranteed = num_mines_in_cur_region;
 
-    let affecting_neighbours = board
-        .neighbours_of(idx)
-        .flat_map(|nidx| board.neighbours_of(nidx))
-        .filter(|&nidx| nidx != idx)
-        .collect::<BTreeSet<_>>();
-
-    for nidx in affecting_neighbours.into_iter() {
-        let CellState::Revealed(CellContent::Number(neighbour_num)) = board.state(nidx).unwrap()
-        else {
+    for &nidx in affecting_neighbours {
+        let CellState::Revealed(CellContent::Number(neighbour_num)) = board[nidx] else {
             continue;
         };
 
-        let ncounts = neighbour_counts(board, nidx);
-        let nbr_region = &ncounts.hidden;
-        let num_mines_in_nbr_region = neighbour_num.checked_sub(ncounts.flagged_count)?;
+        let nbinfo = utils::NeighbourInfo::for_cell(board, nidx);
+        let nbr_region = nbinfo
+            .hidden(board)
+            .map(an_bitmask)
+            .fold(0, |m1, m2| m1 | m2);
+        let num_mines_in_nbr_region = neighbour_num - nbinfo.flagged_count();
 
-        let cur_intersection_nbr = cur_region
-            .intersection(nbr_region)
-            .copied()
-            .collect::<HashSet<_>>();
-
-        let cur_complement_nbr = cur_region
-            .difference(&cur_intersection_nbr)
-            .copied()
-            .collect::<HashSet<_>>();
+        let cur_intersection_nbr = cur_region & nbr_region;
+        let cur_complement_nbr = cur_region & !nbr_region;
 
         // in this case, we use the intersecting region to deduce information about
         // the complement region. so if we don't have both, noop
-        if cur_intersection_nbr.is_empty() || cur_complement_nbr.is_empty() {
+        if cur_intersection_nbr == 0 || cur_complement_nbr == 0 {
             continue;
         }
 
         // minimum mines in the intersection is when every cell of the neighbour
         // that's not intersecting (complement) is a mine.
         let min_mines_in_intersection = num_mines_in_nbr_region
-            .saturating_sub((nbr_region.len() - cur_intersection_nbr.len()) as u8);
+            .saturating_sub(nbinfo.hidden_count() - cur_intersection_nbr.count_ones() as u8);
 
-        let max_mines_in_intersection =
-            std::cmp::min(cur_intersection_nbr.len() as u8, num_mines_in_nbr_region);
+        let max_mines_in_intersection = std::cmp::min(
+            cur_intersection_nbr.count_ones() as u8,
+            num_mines_in_nbr_region,
+        );
 
         // single-constraint deductions
         let are_all_mines_in_intersection = num_mines_in_cur_region == min_mines_in_intersection;
 
         let are_all_mines_in_complement = num_mines_in_cur_region
             .saturating_sub(max_mines_in_intersection)
-            == cur_complement_nbr.len() as u8;
+            == cur_complement_nbr.count_ones() as u8;
 
         if are_all_mines_in_intersection {
-            definitely_not_mines.extend(cur_complement_nbr);
+            definitely_not_mines |= cur_complement_nbr;
         } else if are_all_mines_in_complement {
-            definitely_mines.extend(cur_complement_nbr);
+            definitely_mines |= cur_complement_nbr;
         }
 
         // accumulate for the multi-constraint deduction
         mines_left_min_guaranteed =
             mines_left_min_guaranteed.saturating_sub(max_mines_in_intersection);
-        if cur_intersection_nbr.is_subset(&region_left) {
+
+        // if the intersection is a subset of the region left
+        if cur_intersection_nbr & cur_region_left == cur_intersection_nbr {
             mines_left_max_possible =
                 mines_left_max_possible.saturating_sub(min_mines_in_intersection);
         }
-        region_left.retain(|c| !cur_intersection_nbr.contains(c));
+        cur_region_left &= !cur_intersection_nbr;
     }
 
     // multi-constraint deductions on whatever the intersections didn't cover
-    if !region_left.is_empty() && region_left.len() < cur_region.len() {
-        if mines_left_min_guaranteed == region_left.len() as u8 {
-            definitely_mines.extend(region_left);
+    if cur_region_left > 0 && cur_region_left.count_ones() < cur_region.count_ones() {
+        if mines_left_min_guaranteed == cur_region_left.count_ones() as u8 {
+            definitely_mines |= cur_region_left;
         } else if mines_left_max_possible == 0 {
-            definitely_not_mines.extend(region_left);
+            definitely_not_mines |= cur_region_left;
         }
     }
 
-    if definitely_mines.is_empty() && definitely_not_mines.is_empty() {
+    if definitely_mines == 0 && definitely_not_mines == 0 {
         return None;
     }
 
     let mut modified_indices = Vec::<usize>::new();
 
-    for &i in definitely_mines.iter() {
-        board.flag_cell(i).unwrap();
-    }
+    for (i, &nidx) in affecting_neighbours.iter().enumerate() {
+        let i_mask = 1u32 << i;
+        if definitely_mines & i_mask != 0 {
+            board.flag_cell(nidx).unwrap();
+            modified_indices.push(nidx);
+        } else if definitely_not_mines & i_mask != 0 {
+            let open_res = board.open_cell(nidx).unwrap();
+            assert_ne!(open_res, BoardCellOpenResult::MineExploded);
 
-    modified_indices.extend(definitely_mines);
-
-    for &i in definitely_not_mines.iter() {
-        let open_res = board.open_cell(i).unwrap();
-        // sanity check
-        assert_ne!(open_res, BoardCellOpenResult::MineExploded);
-
-        if let BoardCellOpenResult::RevealedOther(idxs) = open_res {
-            modified_indices.extend(idxs);
+            if let BoardCellOpenResult::Revealed(idxs) = open_res {
+                modified_indices.extend(idxs);
+            }
         }
     }
-
-    modified_indices.extend(definitely_not_mines);
 
     Some(modified_indices)
 }
@@ -287,7 +276,7 @@ fn handle_neighbour_constraining_case(
 ///   don't directly overlap in their neighbourhood.
 /// - Also takes the total mine count into account for end-game deductions.
 pub fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
-    let (frontiers, non_frontier) = find_disjoint_frontiers(board);
+    let (frontiers, non_frontier) = utils::find_disjoint_frontiers(board);
 
     let total_mines_remaining = board.mines_remaining().max(0) as usize;
     let max_mines_per_frontier = total_mines_remaining - frontiers.len() + 1;
@@ -298,24 +287,19 @@ pub fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>
     let get_constraints = |frontier: &Vec<usize>| {
         frontier
             .iter()
-            .flat_map(|&fidx| board.neighbours_of(fidx))
+            .flat_map(|&fidx| board.neighbours_of(fidx, 1))
             .collect::<HashSet<_>>()
             .into_iter()
             .filter_map(|nidx| {
-                let CellState::Revealed(CellContent::Number(cell_num)) = board.state(nidx).unwrap()
-                else {
+                let CellState::Revealed(CellContent::Number(cell_num)) = board[nidx] else {
                     return None;
                 };
 
-                let flagged_count = board
-                    .neighbours_of(nidx)
-                    .filter(|&nnidx| board.state(nnidx).unwrap() == CellState::Flagged)
-                    .count() as u8;
-
+                let flagged_count = utils::NeighbourInfo::for_cell(board, nidx).flagged_count();
                 let mines_needed = cell_num - flagged_count;
 
                 let frontier_neighbour_mask = board
-                    .neighbours_of(nidx)
+                    .neighbours_of(nidx, 1)
                     .filter_map(|nnidx| {
                         frontier
                             .iter()
@@ -461,11 +445,9 @@ pub fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>
         }
     }
 
-    if min_mines_guaranteed_in_entire_frontier == total_mines_remaining {
+    if total_mines_remaining == min_mines_guaranteed_in_entire_frontier {
         definitely_not_mines.extend(non_frontier);
-    } else if max_mines_possible_in_entire_frontier
-        == total_mines_remaining.saturating_sub(non_frontier.len())
-    {
+    } else if total_mines_remaining == max_mines_possible_in_entire_frontier + non_frontier.len() {
         definitely_mines.extend(non_frontier);
     }
 
@@ -478,10 +460,8 @@ pub fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>
     for idx in definitely_not_mines {
         let res = board.open_cell(idx).unwrap();
         assert_ne!(res, BoardCellOpenResult::MineExploded);
-        if res == BoardCellOpenResult::Revealed {
-            modified_indices.push(idx);
-        } else if let BoardCellOpenResult::RevealedOther(indices) = res {
-            modified_indices.extend(indices);
+        if let BoardCellOpenResult::Revealed(idxs) = res {
+            modified_indices.extend(idxs);
         }
     }
 
@@ -490,68 +470,4 @@ pub fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>
     } else {
         Some(modified_indices)
     }
-}
-
-/// Helper method to split the board into disjoint sets of hidden cells that
-/// are mutually independent in terms of constraints.
-/// The returned frontier vecs are in traversal order, so that backtracking can
-/// happens with locality
-fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, HashSet<usize>) {
-    let board_size = board.width * board.height;
-
-    let mut frontier_union_set = HashSet::new();
-    let mut nonfrontier_hidden_cells = HashSet::new();
-
-    for idx in (0..board_size).filter(|&i| board.state(i).unwrap() == CellState::Hidden) {
-        let is_in_frontier = board
-            .neighbours_of(idx)
-            .any(|j| matches!(board.state(j).unwrap(), CellState::Revealed(_)));
-
-        if is_in_frontier {
-            frontier_union_set.insert(idx);
-        } else {
-            nonfrontier_hidden_cells.insert(idx);
-        }
-    }
-
-    // --- BFS to split the frontier into disjoint sets
-
-    let mut visited_cells = HashSet::<usize>::new();
-    let mut frontiers = Vec::<Vec<usize>>::new();
-
-    for &i in frontier_union_set.iter() {
-        if visited_cells.contains(&i) {
-            continue;
-        }
-
-        let mut current_frontier = Vec::new();
-        let mut visit_queue = VecDeque::new();
-
-        visit_queue.push_back(i);
-
-        while let Some(current) = visit_queue.pop_front() {
-            if visited_cells.contains(&current) {
-                continue;
-            }
-            current_frontier.push(current);
-            visited_cells.insert(current);
-
-            // find depth-2 neighbours in the frontier separated by a revealed num
-            // i.e (hidden -> revealed num -> hidden)
-            visit_queue.extend(
-                board
-                    .neighbours_of(current)
-                    .filter(|&n| matches!(board.state(n).unwrap(), CellState::Revealed(_)))
-                    .flat_map(|n| board.neighbours_of(n))
-                    .filter(|next_hidden| {
-                        frontier_union_set.contains(next_hidden)
-                            && !visited_cells.contains(next_hidden)
-                    }),
-            )
-        }
-
-        frontiers.push(current_frontier);
-    }
-
-    (frontiers, nonfrontier_hidden_cells)
 }

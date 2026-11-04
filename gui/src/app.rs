@@ -101,8 +101,8 @@ impl App {
         };
 
         board
-            .neighbours_of(idx)
-            .filter(|&nidx| board.state(nidx).unwrap() == CellState::Flagged)
+            .neighbours_of(idx, 1)
+            .filter(|&nidx| board[nidx] == CellState::Flagged)
             .count() as u8
             > cell_num
     }
