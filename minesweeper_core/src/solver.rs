@@ -4,7 +4,7 @@ use crate::{
     solver::SolverResult::Solved,
     utils,
 };
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 pub enum SolverResult {
     Unsolvable,
@@ -12,8 +12,6 @@ pub enum SolverResult {
 }
 
 pub fn solve_board(board: &mut Board) -> SolverResult {
-    let board_size = board.width * board.height;
-
     // queue of indices that might be relevant (neighbours of any actioned index)
     let mut relevant_queue: VecDeque<usize> = VecDeque::new();
 
@@ -27,7 +25,7 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
                 // reset manual iter
                 manual_iter_index = 0;
                 i
-            } else if manual_iter_index < board_size {
+            } else if manual_iter_index < board.size() {
                 manual_iter_index += 1;
                 manual_iter_index - 1
             } else {
@@ -46,12 +44,12 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
 
             for case_op in [handle_count_match_case, handle_neighbour_constraining_case] {
                 if let Some(modified_indices) = case_op(board, process_index, &neighbour_info) {
+                    let mut seen = vec![false; board.size()];
                     relevant_queue.extend(
                         modified_indices
                             .into_iter()
                             .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
-                            .collect::<HashSet<_>>()
-                            .into_iter()
+                            .filter(|&i| !std::mem::replace(&mut seen[i], true))
                             .filter(|&i| matches!(board[i], CellState::Revealed(_))),
                     );
                     continue 'check_simple_cases;
@@ -66,9 +64,12 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
         // we did a full iteration of the board with no progress on the simple
         // cases. let's try the fallback case and hope for some progress
         if let Some(modified_indices) = handle_frontier_backtracking_case(board) {
+            let mut seen = vec![false; board.size()];
             relevant_queue.extend(
                 modified_indices
                     .into_iter()
+                    .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
+                    .filter(|&i| !std::mem::replace(&mut seen[i], true))
                     .filter(|&i| matches!(board[i], CellState::Revealed(_))),
             );
             continue 'solve_outer;
@@ -284,12 +285,13 @@ pub fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>
     let all_frontiers_size = frontiers.iter().map(|f| f.len()).sum::<usize>();
 
     // accumulate all constraints in the frontier so that can test quickly
-    let get_constraints = |frontier: &Vec<usize>| {
+    let get_constraints = |frontier: &[usize]| {
+        let mut seen = vec![false; board.size()];
+
         frontier
             .iter()
             .flat_map(|&fidx| board.neighbours_of(fidx, 1))
-            .collect::<HashSet<_>>()
-            .into_iter()
+            .filter(|&i| !std::mem::replace(&mut seen[i], true))
             .filter_map(|nidx| {
                 let CellState::Revealed(CellContent::Number(cell_num)) = board[nidx] else {
                     return None;

@@ -1,5 +1,5 @@
 use crate::board::{Board, CellState};
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 pub struct NeighbourInfo {
     cell_idx: usize,
@@ -52,11 +52,11 @@ impl NeighbourInfo {
 /// are mutually independent in terms of constraints.
 /// The returned frontier vecs are in traversal order, so that backtracking can
 /// happens with locality
-pub fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, HashSet<usize>) {
-    let board_size = board.width * board.height;
+pub fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, Vec<usize>) {
+    let board_size = board.size();
 
-    let mut frontier_union_set = HashSet::new();
-    let mut nonfrontier_hidden_cells = HashSet::new();
+    let mut frontier_flags = vec![false; board_size];
+    let mut nonfrontier_flags = vec![false; board_size];
 
     for idx in (0..board_size).filter(|&i| board[i] == CellState::Hidden) {
         let is_in_frontier = board
@@ -64,19 +64,19 @@ pub fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, HashSet<usize
             .any(|j| matches!(board[j], CellState::Revealed(_)));
 
         if is_in_frontier {
-            frontier_union_set.insert(idx);
+            frontier_flags[idx] = true;
         } else {
-            nonfrontier_hidden_cells.insert(idx);
+            nonfrontier_flags[idx] = true;
         }
     }
 
     // --- BFS to split the frontier into disjoint sets
 
-    let mut visited_cells = HashSet::<usize>::new();
+    let mut visited_cells_flags = vec![false; board_size];
     let mut frontiers = Vec::<Vec<usize>>::new();
 
-    for &i in frontier_union_set.iter() {
-        if visited_cells.contains(&i) {
+    for i in (0..board_size).filter(|&i| frontier_flags[i]) {
+        if visited_cells_flags[i] {
             continue;
         }
 
@@ -86,11 +86,11 @@ pub fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, HashSet<usize
         visit_queue.push_back(i);
 
         while let Some(current) = visit_queue.pop_front() {
-            if visited_cells.contains(&current) {
+            if visited_cells_flags[current] {
                 continue;
             }
             current_frontier.push(current);
-            visited_cells.insert(current);
+            visited_cells_flags[current] = true;
 
             // find depth-2 neighbours in the frontier separated by a revealed num
             // i.e (hidden -> revealed num -> hidden)
@@ -99,9 +99,8 @@ pub fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, HashSet<usize
                     .neighbours_of(current, 1)
                     .filter(|&n| matches!(board[n], CellState::Revealed(_)))
                     .flat_map(|n| board.neighbours_of(n, 1))
-                    .filter(|next_hidden| {
-                        frontier_union_set.contains(next_hidden)
-                            && !visited_cells.contains(next_hidden)
+                    .filter(|&next_hidden| {
+                        frontier_flags[next_hidden] && !visited_cells_flags[next_hidden]
                     }),
             )
         }
@@ -109,5 +108,9 @@ pub fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, HashSet<usize
         frontiers.push(current_frontier);
     }
 
-    (frontiers, nonfrontier_hidden_cells)
+    let non_frontier = (0..board_size)
+        .filter(|&i| nonfrontier_flags[i])
+        .collect::<Vec<_>>();
+
+    (frontiers, non_frontier)
 }

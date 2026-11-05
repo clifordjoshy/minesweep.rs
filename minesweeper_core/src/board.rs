@@ -52,6 +52,10 @@ impl BoardCellOpenResult {
 }
 
 impl Board {
+    pub fn size(&self) -> usize {
+        self.width * self.height
+    }
+
     pub fn neighbours_of(&self, idx: usize, radius: u8) -> impl Iterator<Item = usize> + use<> {
         let (width, height) = (self.width, self.height);
         let (x, y) = ((idx % width) as i32, (idx / width) as i32);
@@ -109,8 +113,8 @@ impl Board {
             mine_count,
             start_idx,
             seed,
-            state_grid: vec![CellState::default(); width * height].into_boxed_slice(),
-            content_grid: vec![CellContent::default(); width * height].into_boxed_slice(),
+            state_grid: vec![CellState::default(); total_cells].into_boxed_slice(),
+            content_grid: vec![CellContent::default(); total_cells].into_boxed_slice(),
         };
 
         let definitely_not_mine_indices = board
@@ -159,23 +163,27 @@ impl Board {
                 // open all hidden neighbours (flood fill)
 
                 let mut all_cells_to_open = vec![open_idx];
-                let mut cells_opened = Vec::<usize>::new();
+                let mut cells_opened_flags = vec![false; self.size()];
 
                 while let Some(i) = all_cells_to_open.pop() {
                     let content = self.content_grid[i];
                     self.state_grid[i] = CellState::Revealed(content);
-                    cells_opened.push(i);
+                    cells_opened_flags[i] = true;
 
                     if content != CellContent::Empty {
                         continue;
                     }
 
                     all_cells_to_open.extend(self.neighbours_of(i, 1).filter(|&n| {
-                        self.state_grid[n] == CellState::Hidden && !cells_opened.contains(&n)
+                        self.state_grid[n] == CellState::Hidden && !cells_opened_flags[n]
                     }));
                 }
 
-                BoardCellOpenResult::Revealed(cells_opened)
+                BoardCellOpenResult::Revealed(
+                    (0..self.size())
+                        .filter(|&i| cells_opened_flags[i])
+                        .collect(),
+                )
             }
         };
 
@@ -207,11 +215,11 @@ impl Board {
             return Ok(BoardCellOpenResult::Noop);
         }
 
-        let mut cells_opened = Vec::<usize>::new();
+        let mut cells_opened_flags = vec![false; self.size()];
         let mut open_res = BoardCellOpenResult::Noop;
 
         for nidx in self.neighbours_of(open_idx, 1) {
-            if self.state_grid[nidx] != CellState::Hidden || cells_opened.contains(&nidx) {
+            if self.state_grid[nidx] != CellState::Hidden || cells_opened_flags[nidx] {
                 continue;
             }
             let nopen_res = self.open_cell(nidx).unwrap();
@@ -219,14 +227,20 @@ impl Board {
                 open_res = nopen_res;
                 break;
             } else if let BoardCellOpenResult::Revealed(idxs) = nopen_res {
-                cells_opened.extend(idxs);
+                for i in idxs {
+                    cells_opened_flags[i] = true;
+                }
             }
         }
 
         Ok(if open_res.is_end_condition() {
             open_res
-        } else if !cells_opened.is_empty() {
-            BoardCellOpenResult::Revealed(cells_opened)
+        } else if cells_opened_flags.iter().any(|&f| f) {
+            BoardCellOpenResult::Revealed(
+                (0..self.size())
+                    .filter(|&i| cells_opened_flags[i])
+                    .collect(),
+            )
         } else {
             BoardCellOpenResult::Noop
         })
@@ -259,7 +273,7 @@ impl Board {
             .filter(|s| matches!(s, CellState::Revealed(_)))
             .count();
 
-        let safe_cells = self.width * self.height - self.mine_count;
+        let safe_cells = self.size() - self.mine_count;
 
         revealed_cells == safe_cells
     }
