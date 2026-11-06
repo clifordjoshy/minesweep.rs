@@ -19,11 +19,7 @@ impl NeighbourInfo {
             .neighbours_of(self.cell_idx, 1)
             .enumerate()
             .filter_map(|(niter, board_idx)| {
-                if (self.hidden_bitmask & (1u8 << niter)) != 0 {
-                    Some(board_idx)
-                } else {
-                    None
-                }
+                ((self.hidden_bitmask & (1u8 << niter)) != 0).then_some(board_idx)
             })
     }
 
@@ -84,13 +80,10 @@ pub fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, Vec<usize>) {
         let mut visit_queue = VecDeque::new();
 
         visit_queue.push_back(i);
+        visited_cells_flags[i] = true;
 
         while let Some(current) = visit_queue.pop_front() {
-            if visited_cells_flags[current] {
-                continue;
-            }
             current_frontier.push(current);
-            visited_cells_flags[current] = true;
 
             // find depth-2 neighbours in the frontier separated by a revealed num
             // i.e (hidden -> revealed num -> hidden)
@@ -100,7 +93,8 @@ pub fn find_disjoint_frontiers(board: &Board) -> (Vec<Vec<usize>>, Vec<usize>) {
                     .filter(|&n| matches!(board[n], CellState::Revealed(_)))
                     .flat_map(|n| board.neighbours_of(n, 1))
                     .filter(|&next_hidden| {
-                        frontier_flags[next_hidden] && !visited_cells_flags[next_hidden]
+                        frontier_flags[next_hidden]
+                            && !std::mem::replace(&mut visited_cells_flags[next_hidden], true)
                     }),
             )
         }

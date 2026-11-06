@@ -1,7 +1,6 @@
 use crate::{
     BoardCellOpenResult, CellContent,
     board::{Board, CellState},
-    solver::SolverResult::Solved,
     utils,
 };
 use std::collections::VecDeque;
@@ -15,6 +14,9 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
     // queue of indices that might be relevant (neighbours of any actioned index)
     let mut relevant_queue: VecDeque<usize> = VecDeque::new();
 
+    // list of flags that indicate whether each index is in the queue (used to dedup)
+    let mut in_queue: Vec<bool> = vec![false; board.size()];
+
     'solve_outer: loop {
         // iter index we use when the relevant queue is empty
         // after a full scan of the table, we try the fallback
@@ -22,7 +24,7 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
 
         'check_simple_cases: loop {
             let process_index = if let Some(i) = relevant_queue.pop_front() {
-                // reset manual iter
+                in_queue[i] = false;
                 manual_iter_index = 0;
                 i
             } else if manual_iter_index < board.size() {
@@ -44,13 +46,12 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
 
             for case_op in [handle_count_match_case, handle_neighbour_constraining_case] {
                 if let Some(modified_indices) = case_op(board, process_index, &neighbour_info) {
-                    let mut seen = vec![false; board.size()];
                     relevant_queue.extend(
                         modified_indices
                             .into_iter()
                             .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
-                            .filter(|&i| !std::mem::replace(&mut seen[i], true))
-                            .filter(|&i| matches!(board[i], CellState::Revealed(_))),
+                            .filter(|&i| matches!(board[i], CellState::Revealed(_)))
+                            .filter(|&i| !std::mem::replace(&mut in_queue[i], true)),
                     );
                     continue 'check_simple_cases;
                 }
@@ -58,19 +59,18 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
         }
 
         if board.is_won() {
-            return Solved;
+            return SolverResult::Solved;
         }
 
         // we did a full iteration of the board with no progress on the simple
         // cases. let's try the fallback case and hope for some progress
         if let Some(modified_indices) = handle_frontier_backtracking_case(board) {
-            let mut seen = vec![false; board.size()];
             relevant_queue.extend(
                 modified_indices
                     .into_iter()
                     .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
-                    .filter(|&i| !std::mem::replace(&mut seen[i], true))
-                    .filter(|&i| matches!(board[i], CellState::Revealed(_))),
+                    .filter(|&i| matches!(board[i], CellState::Revealed(_)))
+                    .filter(|&i| !std::mem::replace(&mut in_queue[i], true)),
             );
             continue 'solve_outer;
         } else {
@@ -146,20 +146,15 @@ fn handle_neighbour_constraining_case(
     };
 
     // all operations here will be in the 5x5 square around the `idx` cell
-    // we collect that in advance, and all referenes to region will use an u32
-    // bitmask indicating the index in the below arr (with the LSB being index 0)
-    let mut affecting_neighbours = [usize::MAX; 25];
-    affecting_neighbours[0] = idx;
-    let mut affecting_neighbours_len = 1;
-    for nidx in board.neighbours_of(idx, 2) {
-        affecting_neighbours[affecting_neighbours_len] = nidx;
-        affecting_neighbours_len += 1;
-    }
-    let affecting_neighbours = &affecting_neighbours[0..affecting_neighbours_len];
-
-    let an_bitmask = |x: usize| {
-        if let Some(an_idx) = affecting_neighbours.iter().position(|&y| x == y) {
-            1u32 << an_idx
+    // all referenes to "region" will use an u32 bitmask indicating the indices
+    // of this 25 (at most) sized array (with the LSB being index 0)
+    let board_width = board.width as isize;
+    let region_bitmask_for_idx = |check_idx: usize| {
+        let dx = (check_idx as isize % board_width) - (idx as isize % board_width);
+        let dy = (check_idx as isize / board_width) - (idx as isize / board_width);
+        if dx.abs() <= 2 && dy.abs() <= 2 {
+            let box_index = (dy + 2) * 5 + (dx + 2);
+            1u32 << box_index
         } else {
             0
         }
@@ -167,7 +162,7 @@ fn handle_neighbour_constraining_case(
 
     let cur_region = neighbour_info
         .hidden(board)
-        .map(an_bitmask)
+        .map(region_bitmask_for_idx)
         .fold(0, |m1, m2| m1 | m2);
 
     let num_mines_in_cur_region = cur_cell_number.checked_sub(neighbour_info.flagged_count())?;
@@ -181,7 +176,7 @@ fn handle_neighbour_constraining_case(
     let mut mines_left_max_possible = num_mines_in_cur_region;
     let mut mines_left_min_guaranteed = num_mines_in_cur_region;
 
-    for &nidx in affecting_neighbours {
+    for nidx in board.neighbours_of(idx, 2) {
         let CellState::Revealed(CellContent::Number(neighbour_num)) = board[nidx] else {
             continue;
         };
@@ -189,7 +184,7 @@ fn handle_neighbour_constraining_case(
         let nbinfo = utils::NeighbourInfo::for_cell(board, nidx);
         let nbr_region = nbinfo
             .hidden(board)
-            .map(an_bitmask)
+            .map(region_bitmask_for_idx)
             .fold(0, |m1, m2| m1 | m2);
         let num_mines_in_nbr_region = neighbour_num - nbinfo.flagged_count();
 
@@ -252,12 +247,12 @@ fn handle_neighbour_constraining_case(
 
     let mut modified_indices = Vec::<usize>::new();
 
-    for (i, &nidx) in affecting_neighbours.iter().enumerate() {
-        let i_mask = 1u32 << i;
-        if definitely_mines & i_mask != 0 {
+    for nidx in board.neighbours_of(idx, 1) {
+        let n_mask = region_bitmask_for_idx(nidx);
+        if definitely_mines & n_mask != 0 {
             board.flag_cell(nidx).unwrap();
             modified_indices.push(nidx);
-        } else if definitely_not_mines & i_mask != 0 {
+        } else if definitely_not_mines & n_mask != 0 {
             let open_res = board.open_cell(nidx).unwrap();
             assert_ne!(open_res, BoardCellOpenResult::MineExploded);
 
@@ -276,7 +271,7 @@ fn handle_neighbour_constraining_case(
 /// - Will handle deductions from constraints spanning two revealed cells that
 ///   don't directly overlap in their neighbourhood.
 /// - Also takes the total mine count into account for end-game deductions.
-pub fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
+fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
     let (frontiers, non_frontier) = utils::find_disjoint_frontiers(board);
 
     let total_mines_remaining = board.mines_remaining().max(0) as usize;
