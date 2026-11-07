@@ -462,9 +462,5 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
         }
     }
 
-    if modified_indices.is_empty() {
-        None
-    } else {
-        Some(modified_indices)
-    }
+    (!modified_indices.is_empty()).then_some(modified_indices)
 }

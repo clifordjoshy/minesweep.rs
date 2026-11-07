@@ -164,7 +164,10 @@ impl Board {
 
         let mut result = match content {
             CellContent::Mine => BoardCellOpenResult::MineExploded,
-            CellContent::Number(_) => BoardCellOpenResult::Revealed(vec![open_idx]),
+            CellContent::Number(_) => {
+                self.revealed_count += 1;
+                BoardCellOpenResult::Revealed(vec![open_idx])
+            }
             CellContent::Empty => {
                 // open all hidden neighbours (flood fill)
                 let mut revealed_cells = vec![open_idx];
@@ -197,7 +200,7 @@ impl Board {
             // mark any pending cells as flagged
             for i in 0..self.state_grid.len() {
                 if self.state_grid[i] == CellState::Hidden {
-                    self.state_grid[i] = CellState::Flagged;
+                    self.flag_cell(i).unwrap();
                 }
             }
             result = BoardCellOpenResult::AllMinesSweeped;
