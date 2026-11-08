@@ -17,6 +17,13 @@ pub enum CellState {
     Flagged,
 }
 
+pub struct BoardParams {
+    pub width: usize,
+    pub height: usize,
+    pub mine_count: usize,
+    pub start_idx: usize,
+}
+
 #[derive(Clone)]
 pub struct Board {
     pub width: usize,
@@ -81,23 +88,14 @@ impl Board {
             })
     }
 
-    pub fn new(
-        width: usize,
-        height: usize,
-        mine_count: usize,
-        start_idx: usize,
-    ) -> Result<Self, BoardError> {
-        let seed = rand::random();
-        Self::from_seed(width, height, mine_count, start_idx, seed)
-    }
+    pub(crate) fn from_seed(params: &BoardParams, seed: u64) -> Result<Self, BoardError> {
+        let BoardParams {
+            width,
+            height,
+            mine_count,
+            start_idx,
+        } = *params;
 
-    pub fn from_seed(
-        width: usize,
-        height: usize,
-        mine_count: usize,
-        start_idx: usize,
-        seed: u64,
-    ) -> Result<Self, BoardError> {
         let total_cells = width * height;
 
         if total_cells < 16 {

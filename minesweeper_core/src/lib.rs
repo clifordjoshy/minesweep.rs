@@ -1,6 +1,7 @@
 pub mod board;
 pub use board::*;
-
 pub mod generator;
-pub mod solver;
+pub use generator::*;
+
+mod solver;
 mod utils;

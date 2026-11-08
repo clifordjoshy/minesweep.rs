@@ -1,4 +1,4 @@
-use minesweeper_core::{Board, BoardCellOpenResult, CellContent, CellState};
+use minesweeper_core::*;
 
 use crate::config::{Difficulty, GameStatus};
 
@@ -46,7 +46,12 @@ impl App {
         let Some(board) = &mut self.board else {
             // First click: generate the board around the clicked cell.
             let (w, h, mines) = self.difficulty.params();
-            let Ok(board) = Board::new(w, h, mines, idx) else {
+            let Ok(board) = SolvableBoardGenerator.generate(&BoardParams {
+                width: w,
+                height: h,
+                mine_count: mines,
+                start_idx: idx,
+            }) else {
                 return;
             };
             self.board = Some(board);
