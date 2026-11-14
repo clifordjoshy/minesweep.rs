@@ -5,6 +5,7 @@ use crate::{
 };
 use std::collections::VecDeque;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum SolverResult {
     Unsolvable,
     Solved,
@@ -254,7 +255,13 @@ fn handle_neighbour_constraining_case(
             modified_indices.push(nidx);
         } else if definitely_not_mines & n_mask != 0 {
             let open_res = board.open_cell(nidx).unwrap();
-            assert_ne!(open_res, BoardCellOpenResult::MineExploded);
+            assert_ne!(
+                open_res,
+                BoardCellOpenResult::MineExploded,
+                "Opened {} and lost it all. Was processing {idx} : {:?}",
+                nidx,
+                board
+            );
 
             if let BoardCellOpenResult::Revealed(idxs) = open_res {
                 modified_indices.extend(idxs);
@@ -275,7 +282,7 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
     let (frontiers, non_frontier) = utils::find_disjoint_frontiers(board);
 
     let total_mines_remaining = board.mines_remaining().max(0) as usize;
-    let max_mines_per_frontier = total_mines_remaining - frontiers.len() + 1;
+    let max_mines_per_frontier = total_mines_remaining + 1 - frontiers.len();
 
     let all_frontiers_size = frontiers.iter().map(|f| f.len()).sum::<usize>();
 

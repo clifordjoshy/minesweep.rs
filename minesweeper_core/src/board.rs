@@ -287,6 +287,64 @@ impl Board {
         }
         Ok(self.state_grid[idx])
     }
+
+    pub(crate) fn content(&self, idx: usize) -> CellContent {
+        self.content_grid[idx]
+    }
+
+    fn rehide_cell(&mut self, idx: usize) {
+        match self.state_grid[idx] {
+            CellState::Hidden => return,
+            CellState::Flagged => self.flagged_count -= 1,
+            CellState::Revealed(_) => self.revealed_count -= 1,
+        }
+
+        self.state_grid[idx] = CellState::Hidden;
+    }
+
+    pub(crate) fn move_mine(&mut self, source_idx: usize, dest_idx: usize) {
+        assert!(self.content_grid[source_idx] == CellContent::Mine);
+        assert!(self.content_grid[dest_idx] != CellContent::Mine);
+
+        self.content_grid[dest_idx] = CellContent::Mine;
+        self.content_grid[source_idx] = match self
+            .neighbours_of(source_idx, 1)
+            .filter(|&i| i != dest_idx && self.content_grid[i] == CellContent::Mine)
+            .count()
+        {
+            0 => CellContent::Empty,
+            mc => CellContent::Number(mc as u8),
+        };
+        self.rehide_cell(source_idx);
+        self.rehide_cell(dest_idx);
+
+        for i in self.neighbours_of(source_idx, 1) {
+            match self.content_grid[i] {
+                CellContent::Mine => continue,
+                CellContent::Number(n) if n > 1 => {
+                    self.content_grid[i] = CellContent::Number(n - 1);
+                }
+                CellContent::Number(_) => self.content_grid[i] = CellContent::Empty,
+                CellContent::Empty => unreachable!(),
+            };
+            self.rehide_cell(i);
+        }
+        for i in self.neighbours_of(dest_idx, 1) {
+            match self.content_grid[i] {
+                CellContent::Mine => continue,
+                CellContent::Empty => self.content_grid[i] = CellContent::Number(1),
+                CellContent::Number(n) => self.content_grid[i] = CellContent::Number(n + 1),
+            };
+            self.rehide_cell(i);
+        }
+    }
+
+    pub fn reset_state(&mut self) {
+        self.state_grid.fill(CellState::Hidden);
+        self.flagged_count = 0;
+        self.revealed_count = 0;
+        self.open_cell(self.start_idx).unwrap();
+    }
 }
 
 impl std::ops::Index<usize> for Board {

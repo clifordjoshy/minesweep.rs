@@ -5,6 +5,7 @@ pub struct NeighbourInfo {
     cell_idx: usize,
     hidden_bitmask: u8,
     flagged_bitmask: u8,
+    revealed_bitmask: u8,
 }
 
 impl NeighbourInfo {
@@ -13,6 +14,9 @@ impl NeighbourInfo {
     }
     pub fn flagged_count(&self) -> u8 {
         self.flagged_bitmask.count_ones() as u8
+    }
+    pub fn revealed_count(&self) -> u8 {
+        self.revealed_bitmask.count_ones() as u8
     }
     pub fn hidden<'a>(&'a self, board: &Board) -> impl Iterator<Item = usize> + use<'a> {
         board
@@ -26,13 +30,14 @@ impl NeighbourInfo {
     pub fn for_cell(board: &Board, idx: usize) -> Self {
         let mut hidden_bitmask = 0u8;
         let mut flagged_bitmask = 0u8;
+        let mut revealed_bitmask = 0u8;
 
         for (niter, board_idx) in board.neighbours_of(idx, 1).enumerate() {
             let niter_mask = 1u8 << niter;
             match board[board_idx] {
                 CellState::Hidden => hidden_bitmask |= niter_mask,
                 CellState::Flagged => flagged_bitmask |= niter_mask,
-                CellState::Revealed(_) => {}
+                CellState::Revealed(_) => revealed_bitmask |= niter_mask,
             }
         }
 
@@ -40,6 +45,7 @@ impl NeighbourInfo {
             cell_idx: idx,
             hidden_bitmask,
             flagged_bitmask,
+            revealed_bitmask,
         }
     }
 }
