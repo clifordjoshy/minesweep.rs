@@ -1,4 +1,4 @@
-use rand::prelude::{SeedableRng, SliceRandom, StdRng};
+use rand::prelude::{SeedableRng, SliceRandom, SmallRng};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum CellContent {
@@ -132,7 +132,7 @@ impl Board {
         let mut indices_to_place = (0..total_cells)
             .filter(|idx| !definitely_not_mine_indices.contains(idx))
             .collect::<Vec<_>>();
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rng = SmallRng::seed_from_u64(seed);
         let mine_indices = &*indices_to_place.partial_shuffle(&mut rng, mine_count).0;
 
         for &midx in mine_indices {
