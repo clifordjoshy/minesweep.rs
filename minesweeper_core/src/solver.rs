@@ -11,12 +11,26 @@ pub enum SolverResult {
     Solved,
 }
 
-pub fn solve_board(board: &mut Board) -> SolverResult {
+pub fn solve_board(board: &mut Board, start_from: Vec<usize>) -> SolverResult {
     // queue of indices that might be relevant (neighbours of any actioned index)
-    let mut relevant_queue: VecDeque<usize> = VecDeque::new();
+    let mut relevant_queue = VecDeque::<usize>::new();
 
     // list of flags that indicate whether each index is in the queue (used to dedup)
     let mut in_queue: Vec<bool> = vec![false; board.size()];
+
+    macro_rules! enqueue_relevant_indices {
+        ($idxs:expr) => {
+            relevant_queue.extend(
+                $idxs
+                    .into_iter()
+                    .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
+                    .filter(|&i| matches!(board[i], CellState::Revealed(_)))
+                    .filter(|&i| !std::mem::replace(&mut in_queue[i], true)),
+            );
+        };
+    }
+
+    enqueue_relevant_indices!(start_from);
 
     'solve_outer: loop {
         // iter index we use when the relevant queue is empty
@@ -47,13 +61,7 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
 
             for case_op in [handle_count_match_case, handle_neighbour_constraining_case] {
                 if let Some(modified_indices) = case_op(board, process_index, &neighbour_info) {
-                    relevant_queue.extend(
-                        modified_indices
-                            .into_iter()
-                            .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
-                            .filter(|&i| matches!(board[i], CellState::Revealed(_)))
-                            .filter(|&i| !std::mem::replace(&mut in_queue[i], true)),
-                    );
+                    enqueue_relevant_indices!(modified_indices);
                     continue 'check_simple_cases;
                 }
             }
@@ -66,13 +74,7 @@ pub fn solve_board(board: &mut Board) -> SolverResult {
         // we did a full iteration of the board with no progress on the simple
         // cases. let's try the fallback case and hope for some progress
         if let Some(modified_indices) = handle_frontier_backtracking_case(board) {
-            relevant_queue.extend(
-                modified_indices
-                    .into_iter()
-                    .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
-                    .filter(|&i| matches!(board[i], CellState::Revealed(_)))
-                    .filter(|&i| !std::mem::replace(&mut in_queue[i], true)),
-            );
+            enqueue_relevant_indices!(modified_indices);
             continue 'solve_outer;
         } else {
             // nothing else to do now

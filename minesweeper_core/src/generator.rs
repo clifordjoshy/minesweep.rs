@@ -36,7 +36,7 @@ impl BoardGenerator for SolvableBoardGenerator {
         loop {
             let mut board = Board::from_seed(params, seed)?;
 
-            if solver::solve_board(&mut board) == SolverResult::Solved
+            if solver::solve_board(&mut board, vec![params.start_idx]) == SolverResult::Solved
                 || self.perturb_and_solve_board(&mut board) == SolverResult::Solved
             {
                 board.reset_state();
@@ -142,23 +142,25 @@ impl SolvableBoardGenerator {
                 }
             }
             if found_a_move {
-                if mine_donors.len() >= empty.len() {
+                let modified_indices = if mine_donors.len() >= empty.len() {
                     for (&s, &d) in mine_donors.iter().zip(empty.iter()) {
                         board.move_mine(s, d);
                     }
-                    for d in empty {
+                    for &d in empty.iter() {
                         board.flag_cell(d).unwrap();
                     }
+                    empty
                 } else {
                     for (&s, &d) in mines.iter().zip(mine_receivers.iter()) {
                         board.move_mine(s, d);
                         board.open_cell(s).unwrap();
                     }
-                    for s in mines {
+                    for &s in mines.iter() {
                         board.open_cell(s).unwrap();
                     }
+                    mines
                 };
-                if solver::solve_board(board) == SolverResult::Solved {
+                if solver::solve_board(board, modified_indices) == SolverResult::Solved {
                     return SolverResult::Solved;
                 }
             } else {
