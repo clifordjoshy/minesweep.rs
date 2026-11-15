@@ -33,6 +33,10 @@ pub fn solve_board(board: &mut Board, start_from: Vec<usize>) -> SolverResult {
     enqueue_relevant_indices!(start_from);
 
     'solve_outer: loop {
+        if board.is_won() {
+            return SolverResult::Solved;
+        }
+
         // iter index we use when the relevant queue is empty
         // after a full scan of the table, we try the fallback
         let mut manual_iter_index = 0;
@@ -48,10 +52,6 @@ pub fn solve_board(board: &mut Board, start_from: Vec<usize>) -> SolverResult {
             } else {
                 break;
             };
-
-            if !matches!(board[process_index], CellState::Revealed(_)) {
-                continue;
-            }
 
             let neighbour_info = utils::NeighbourInfo::for_cell(board, process_index);
 
@@ -464,10 +464,11 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
         modified_indices.push(idx);
     }
     for idx in definitely_not_mines {
-        let res = board.open_cell(idx).unwrap();
-        assert_ne!(res, BoardCellOpenResult::MineExploded);
-        if let BoardCellOpenResult::Revealed(idxs) = res {
-            modified_indices.extend(idxs);
+        match board.open_cell(idx).unwrap() {
+            BoardCellOpenResult::Noop => {}
+            BoardCellOpenResult::Revealed(idxs) => modified_indices.extend(idxs),
+            BoardCellOpenResult::AllMinesSweeped => modified_indices.push(idx),
+            BoardCellOpenResult::MineExploded => unreachable!(),
         }
     }
 

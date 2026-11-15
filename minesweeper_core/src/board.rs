@@ -24,13 +24,13 @@ pub struct BoardParams {
     pub start_idx: usize,
 }
 
-#[derive(Clone)]
 pub struct Board {
     pub width: usize,
     pub height: usize,
     pub mine_count: usize,
     pub seed: u64,
     pub start_idx: usize,
+    start_region: [usize; 9],
     state_grid: Box<[CellState]>,
     content_grid: Box<[CellContent]>,
     revealed_count: usize,
@@ -117,20 +117,21 @@ impl Board {
             height,
             mine_count,
             start_idx,
+            start_region: [usize::MAX; 9],
             seed,
             state_grid: vec![CellState::default(); total_cells].into_boxed_slice(),
             content_grid: vec![CellContent::default(); total_cells].into_boxed_slice(),
             revealed_count: 0,
             flagged_count: 0,
         };
-
-        let definitely_not_mine_indices = board
+        let mut start_region_iter = board
             .neighbours_of(start_idx, 1)
-            .chain(std::iter::once(start_idx))
-            .collect::<Vec<_>>();
+            .chain(std::iter::once(start_idx));
+        board.start_region =
+            std::array::from_fn(|_| start_region_iter.next().unwrap_or(usize::MAX));
 
         let mut indices_to_place = (0..total_cells)
-            .filter(|idx| !definitely_not_mine_indices.contains(idx))
+            .filter(|&idx| !board.is_in_start_region(idx))
             .collect::<Vec<_>>();
         let mut rng = SmallRng::seed_from_u64(seed);
         let mine_indices = &*indices_to_place.partial_shuffle(&mut rng, mine_count).0;
@@ -293,6 +294,8 @@ impl Board {
     }
 
     fn rehide_cell(&mut self, idx: usize) {
+        assert!(!self.is_in_start_region(idx));
+
         match self.state_grid[idx] {
             CellState::Hidden => return,
             CellState::Flagged => self.flagged_count -= 1,
@@ -302,9 +305,17 @@ impl Board {
         self.state_grid[idx] = CellState::Hidden;
     }
 
+    pub(crate) fn is_in_start_region(&self, idx: usize) -> bool {
+        // the start region arr has default value usize::MAX
+        // avoid that from equality check
+        assert_ne!(idx, usize::MAX);
+        self.start_region.contains(&idx)
+    }
     pub(crate) fn move_mine(&mut self, source_idx: usize, dest_idx: usize) {
         assert!(self.content_grid[source_idx] == CellContent::Mine);
         assert!(self.content_grid[dest_idx] != CellContent::Mine);
+
+        assert!(!self.is_in_start_region(dest_idx));
 
         self.content_grid[dest_idx] = CellContent::Mine;
         self.content_grid[source_idx] = match self
@@ -327,7 +338,11 @@ impl Board {
                 CellContent::Number(_) => self.content_grid[i] = CellContent::Empty,
                 CellContent::Empty => unreachable!(),
             };
-            self.rehide_cell(i);
+            if !self.is_in_start_region(i) {
+                self.rehide_cell(i);
+            } else {
+                self.state_grid[i] = CellState::Revealed(self.content_grid[i]);
+            }
         }
         for i in self.neighbours_of(dest_idx, 1) {
             match self.content_grid[i] {
@@ -335,7 +350,11 @@ impl Board {
                 CellContent::Empty => self.content_grid[i] = CellContent::Number(1),
                 CellContent::Number(n) => self.content_grid[i] = CellContent::Number(n + 1),
             };
-            self.rehide_cell(i);
+            if !self.is_in_start_region(i) {
+                self.rehide_cell(i);
+            } else {
+                self.state_grid[i] = CellState::Revealed(self.content_grid[i]);
+            }
         }
     }
 

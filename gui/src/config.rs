@@ -1,39 +1,39 @@
-pub const APP_NAME: &str = "Minesweeper.rs";
+pub const APP_NAME: &str = "minesweep.rs";
 
 /// Side length of one cell in screen points.
 pub const CELL_SIZE: f32 = 28.0;
 
 /// The three standard Minesweeper presets.
-#[derive(Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
 pub enum Difficulty {
     #[default]
     Beginner,
     Intermediate,
     Expert,
+    Master,
 }
 
 impl Difficulty {
-    pub const ALL: [Difficulty; 3] = [
+    pub const ALL: [Difficulty; 4] = [
         Difficulty::Beginner,
         Difficulty::Intermediate,
         Difficulty::Expert,
+        Difficulty::Master,
     ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Difficulty::Beginner => "Beginner (9x9, 10)",
-            Difficulty::Intermediate => "Intermediate (16x16, 40)",
-            Difficulty::Expert => "Expert (30x16, 99)",
-        }
-    }
 
     /// Returns `(width, height, mine_count)`.
     pub fn params(self) -> (usize, usize, usize) {
         match self {
-            Difficulty::Beginner => (9, 9, 10),
+            Difficulty::Beginner => (10, 10, 10),
             Difficulty::Intermediate => (16, 16, 40),
             Difficulty::Expert => (30, 16, 99),
+            Difficulty::Master => (30, 24, 200),
         }
+    }
+
+    pub fn label(self) -> String {
+        let (w, h, m) = self.params();
+        format!("{:?} ({}x{}, {})", self, w, h, m)
     }
 }
 
