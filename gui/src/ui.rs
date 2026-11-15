@@ -202,7 +202,7 @@ impl eframe::App for app::App {
                             || resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                             && has_seed
                         {
-                            if self.start_from_seed(self.seed_input.clone()).is_ok() {
+                            if self.start_from_repr(ui, self.seed_input.clone()).is_ok() {
                                 self.seed_errored = false;
                                 self.seed_mode = false;
                                 self.seed_input.clear();
@@ -217,16 +217,34 @@ impl eframe::App for app::App {
             // --- Status line ------------------------------------------------
             ui.horizontal(|ui| {
                 ui.label(format!(
-                    "Mines left: {}/{}",
+                    "Mines: {}/{}",
                     self.mines_remaining(),
                     self.difficulty.params().2
                 ));
+                ui.separator();
+
+                if let Some(start_time) = self.timer_start {
+                    let total_secs = (ui.time() - start_time) as u64;
+                    let s = (total_secs % 60) as u8;
+                    let m = ((total_secs / 60) % 60) as u8;
+                    let h = (total_secs / 3600) as u8;
+                    self.elapsed_time = format!("{:02}:{:02}:{:02}", h, m, s);
+                    ui.request_repaint_after(std::time::Duration::from_secs(1));
+                }
+                ui.label(format!("Time: {}", self.elapsed_time));
                 if self.status != config::GameStatus::Ready {
                     ui.separator();
-                    ui.label(self.get_seed_str());
+                    ui.label(self.to_repr());
                 }
                 ui.separator();
-                ui.label(self.status.label());
+                ui.colored_label(
+                    match self.status {
+                        config::GameStatus::Lost => ui.visuals().error_fg_color,
+                        config::GameStatus::Won => Color32::DARK_GREEN,
+                        _ => ui.visuals().text_color(),
+                    },
+                    self.status.label(),
+                );
             });
 
             ui.separator();
@@ -269,7 +287,7 @@ impl eframe::App for app::App {
                     );
 
                     if response.clicked() {
-                        self.on_cell_click(idx);
+                        self.on_cell_click(ui, idx);
                     } else if response.secondary_clicked() {
                         self.on_cell_flagged(idx);
                     }

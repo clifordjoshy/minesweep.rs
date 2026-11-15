@@ -3,9 +3,8 @@ pub const APP_NAME: &str = "minesweep.rs";
 /// Side length of one cell in screen points.
 pub const CELL_SIZE: f32 = 28.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum Difficulty {
-    #[default]
     Beginner,
     Intermediate,
     Expert,
@@ -34,32 +33,11 @@ impl Difficulty {
         let (w, h, m) = self.params();
         format!("{:?} ({}x{}, {})", self, w, h, m)
     }
-
-    pub fn to_rep(self) -> &'static str {
-        match self {
-            Difficulty::Beginner => "b",
-            Difficulty::Intermediate => "i",
-            Difficulty::Expert => "e",
-            Difficulty::Master => "m",
-        }
-    }
-
-    pub fn from_rep(rep: &str) -> Option<Self> {
-        Some(match rep {
-            "b" => Difficulty::Beginner,
-            "i" => Difficulty::Intermediate,
-            "e" => Difficulty::Expert,
-            "m" => Difficulty::Master,
-            _ => return None,
-        })
-    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
-
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum BoardType {
     Simple,
-    #[default]
     Solvable,
 }
 
@@ -71,9 +49,8 @@ impl BoardType {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum GameStatus {
-    #[default]
     Ready,
     Playing,
     Won,

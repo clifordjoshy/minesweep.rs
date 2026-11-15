@@ -2,18 +2,25 @@ use minesweeper_core::*;
 
 use crate::config::{BoardType, Difficulty, GameStatus};
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct App {
     pub board_type: BoardType,
     pub difficulty: Difficulty,
 
+    // seed input
     #[serde(skip)]
     pub seed_mode: bool,
     #[serde(skip)]
     pub seed_input: String,
     #[serde(skip)]
     pub seed_errored: bool,
+
+    // timer
+    #[serde(skip)]
+    pub timer_start: Option<f64>,
+    #[serde(skip)]
+    pub elapsed_time: String,
 
     /// `None` until the first click, because `Board::new` needs the start
     /// index in order to guarantee a safe first move.
@@ -22,6 +29,22 @@ pub struct App {
 
     #[serde(skip)]
     pub status: GameStatus,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            board_type: BoardType::Solvable,
+            difficulty: Difficulty::Intermediate,
+            seed_mode: false,
+            seed_input: Default::default(),
+            seed_errored: false,
+            timer_start: None,
+            elapsed_time: "00:00:00".to_owned(),
+            board: None,
+            status: GameStatus::Ready,
+        }
+    }
 }
 
 impl App {
@@ -43,35 +66,68 @@ impl App {
     pub fn reset(&mut self) {
         self.board = None;
         self.status = GameStatus::Ready;
+        self.timer_start = None;
+        self.elapsed_time = "00:00:00".to_owned();
     }
 
-    pub fn get_seed_str(&self) -> String {
+    pub fn to_repr(&self) -> String {
+        let d = match self.difficulty {
+            Difficulty::Beginner => "b",
+            Difficulty::Intermediate => "i",
+            Difficulty::Expert => "e",
+            Difficulty::Master => "m",
+        };
+        let b = match self.board_type {
+            BoardType::Simple => "0",
+            BoardType::Solvable => "1",
+        };
         format!(
-            "Seed: {:x}x{:x}{}",
+            "Seed: {:x}x{:x}{}{}",
             self.get_seed(),
             self.get_start(),
-            self.difficulty.to_rep()
+            d,
+            b
         )
     }
 
-    pub fn parse_seed_str(&self, seed_str: &str) -> Option<(u64, usize, Difficulty)> {
+    pub fn parse_repr(&self, seed_str: &str) -> Option<(u64, usize, Difficulty, BoardType)> {
         let (rng_part, config_part) = seed_str.trim().split_once('x')?;
-        let (idx_part, difficulty_part) = config_part.split_at(config_part.len().checked_sub(1)?);
+
+        let l = config_part.len();
+        if l < 3 {
+            return None;
+        }
+        let idx_part = &config_part[..l - 2];
+        let d = &config_part[l - 2..l - 1];
+        let b = &config_part[l - 1..];
 
         let rng_seed = u64::from_str_radix(rng_part, 16).ok()?;
-        let start_idx = idx_part.parse::<usize>().ok()?;
-        let difficulty = Difficulty::from_rep(difficulty_part)?;
+        let start_idx = usize::from_str_radix(idx_part, 16).ok()?;
 
-        Some((rng_seed, start_idx, difficulty))
+        let difficulty = match d {
+            "b" => Difficulty::Beginner,
+            "i" => Difficulty::Intermediate,
+            "e" => Difficulty::Expert,
+            "m" => Difficulty::Master,
+            _ => return None,
+        };
+
+        let board_type = match b {
+            "0" => BoardType::Simple,
+            "1" => BoardType::Solvable,
+            _ => return None,
+        };
+
+        Some((rng_seed, start_idx, difficulty, board_type))
     }
 
-    pub fn start_from_seed(&mut self, seed_str: String) -> Result<(), BoardError> {
-        let (seed, start_idx, difficulty) = self
-            .parse_seed_str(&seed_str)
-            .ok_or(BoardError::InvalidInput)?;
+    pub fn start_from_repr(&mut self, ctx: &egui::Ui, seed_str: String) -> Result<(), BoardError> {
+        let (seed, start_idx, difficulty, board_type) =
+            self.parse_repr(&seed_str).ok_or(BoardError::InvalidInput)?;
 
         self.reset();
         self.difficulty = difficulty;
+        self.board_type = board_type;
         let (w, h, mines) = self.difficulty.params();
         let board_gen: &'static dyn BoardGenerator = match self.board_type {
             BoardType::Simple => &SimpleBoardGenerator,
@@ -87,13 +143,22 @@ impl App {
             seed,
         )?;
         self.board = Some(board);
-        self.status = GameStatus::Playing;
+        self.update_game_status(ctx, GameStatus::Playing);
 
         Ok(())
     }
 
+    pub fn update_game_status(&mut self, ctx: &egui::Ui, status: GameStatus) {
+        self.status = status;
+        if status == GameStatus::Playing {
+            self.timer_start = Some(ctx.time())
+        } else {
+            self.timer_start = None;
+        }
+    }
+
     /// Left click on a cell.
-    pub fn on_cell_click(&mut self, idx: usize) {
+    pub fn on_cell_click(&mut self, ctx: &egui::Ui, idx: usize) {
         if matches!(self.status, GameStatus::Won | GameStatus::Lost) {
             return;
         }
@@ -114,7 +179,7 @@ impl App {
                 return;
             };
             self.board = Some(board);
-            self.status = GameStatus::Playing;
+            self.update_game_status(ctx, GameStatus::Playing);
             return;
         };
 
@@ -126,9 +191,9 @@ impl App {
 
         if let Ok(result) = open_res {
             if result == BoardCellOpenResult::MineExploded {
-                self.status = GameStatus::Lost;
+                self.update_game_status(ctx, GameStatus::Lost);
             } else if result == BoardCellOpenResult::AllMinesSweeped {
-                self.status = GameStatus::Won;
+                self.update_game_status(ctx, GameStatus::Won);
             }
         }
     }
