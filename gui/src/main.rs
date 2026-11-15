@@ -8,16 +8,15 @@ mod ui;
 fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
-    let (max_w, max_h, _) = config::Difficulty::ALL.last().unwrap().params();
-    let container_size = (
-        max_w as f32 * config::CELL_SIZE + 100.0,
-        max_h as f32 * config::CELL_SIZE + 100.0,
-    );
+    // let (max_w, max_h, _) = config::Difficulty::ALL.last().unwrap().params();
+    // let container_size = (
+    //     max_w as f32 * config::CELL_SIZE + 100.0,
+    //     max_h as f32 * config::CELL_SIZE + 100.0,
+    // );
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size(container_size)
-            .with_min_inner_size(container_size)
+            // .with_min_inner_size(container_size)
             .with_icon(
                 eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
                     .expect("Failed to load icon"),

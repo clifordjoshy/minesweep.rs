@@ -34,6 +34,25 @@ impl Difficulty {
         let (w, h, m) = self.params();
         format!("{:?} ({}x{}, {})", self, w, h, m)
     }
+
+    pub fn to_rep(self) -> &'static str {
+        match self {
+            Difficulty::Beginner => "b",
+            Difficulty::Intermediate => "i",
+            Difficulty::Expert => "e",
+            Difficulty::Master => "m",
+        }
+    }
+
+    pub fn from_rep(rep: &str) -> Option<Self> {
+        Some(match rep {
+            "b" => Difficulty::Beginner,
+            "i" => Difficulty::Intermediate,
+            "e" => Difficulty::Expert,
+            "m" => Difficulty::Master,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]

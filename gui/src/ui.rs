@@ -106,44 +106,17 @@ fn paint_cell(
 
 impl eframe::App for app::App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::top("top_panel").show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                // NOTE: no File->Quit on web pages!
-                let is_web = cfg!(target_arch = "wasm32");
-                if !is_web {
-                    ui.menu_button("File", |ui| {
-                        if ui.button("Quit").clicked() {
-                            ui.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                    });
-                    ui.add_space(16.0);
-                }
-
-                egui::widgets::global_theme_preference_buttons(ui);
-            });
-        });
-
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.heading(config::APP_NAME);
-
-            // --- Controls: Board Type -------------
             ui.horizontal(|ui| {
-                let mut changed = false;
-                for b in config::BoardType::ALL {
-                    if ui
-                        .selectable_value(&mut self.board_type, b, b.label())
-                        .changed()
-                    {
-                        changed = true;
-                    }
-                }
-                if changed {
-                    self.reset();
-                }
+                ui.heading(config::APP_NAME);
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    egui::widgets::global_theme_preference_buttons(ui);
+                });
             });
 
-            // --- Controls: difficulty picker + new game button -------------
-            ui.horizontal(|ui| {
+            // --- Controls: difficulty picker -------------
+            ui.horizontal_wrapped(|ui| {
                 let mut difficulty_changed = false;
                 for d in config::Difficulty::ALL {
                     if ui
@@ -156,11 +129,89 @@ impl eframe::App for app::App {
                 if difficulty_changed {
                     self.reset();
                 }
+            });
 
-                ui.add_space(16.0);
-                if ui.button("New game").clicked() {
+            // --- Controls: Board Type  + new game button -------------
+            ui.horizontal_wrapped(|ui| {
+                let mut changed = false;
+                for b in config::BoardType::ALL {
+                    if ui
+                        .selectable_value(&mut self.board_type, b, b.label())
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                }
+                if changed {
                     self.reset();
                 }
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+
+                    if ui
+                        .add(
+                            egui::Button::new("New Game").corner_radius(egui::CornerRadius {
+                                nw: 4,
+                                ne: 0,
+                                sw: 4,
+                                se: 0,
+                            }),
+                        )
+                        .clicked()
+                    {
+                        self.reset();
+                    }
+                    ui.add_space(2.0);
+                    let seed_id = egui::Id::unique("seed_input");
+                    if ui
+                        .add(
+                            egui::Button::new(if self.seed_mode { "◂" } else { "▸" })
+                                .corner_radius(egui::CornerRadius {
+                                    nw: 0,
+                                    ne: 4,
+                                    sw: 0,
+                                    se: 4,
+                                }),
+                        )
+                        .clicked()
+                    {
+                        self.seed_mode = !self.seed_mode;
+                        if self.seed_mode {
+                            ui.memory_mut(|m| m.request_focus(seed_id));
+                        }
+                    }
+
+                    if self.seed_mode {
+                        let mut textin = egui::TextEdit::singleline(&mut self.seed_input)
+                            .id(seed_id)
+                            .hint_text("start from seed")
+                            .desired_width(150.0);
+                        if self.seed_errored {
+                            textin = textin.text_color(egui::Color32::LIGHT_RED);
+                        }
+                        let resp = ui.add(textin);
+                        if resp.changed() {
+                            self.seed_errored = false;
+                        }
+
+                        let has_seed = !self.seed_input.trim().len() > 16;
+
+                        if (ui.add_enabled(has_seed, egui::Button::new("Go")).clicked()
+                            || resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                            && has_seed
+                        {
+                            if self.start_from_seed(self.seed_input.clone()).is_ok() {
+                                self.seed_errored = false;
+                                self.seed_mode = false;
+                                self.seed_input.clear();
+                            } else {
+                                self.seed_errored = true;
+                            }
+                        }
+                    }
+                });
             });
 
             // --- Status line ------------------------------------------------
@@ -170,6 +221,10 @@ impl eframe::App for app::App {
                     self.mines_remaining(),
                     self.difficulty.params().2
                 ));
+                if self.status != config::GameStatus::Ready {
+                    ui.separator();
+                    ui.label(self.get_seed_str());
+                }
                 ui.separator();
                 ui.label(self.status.label());
             });
@@ -177,56 +232,48 @@ impl eframe::App for app::App {
             ui.separator();
 
             // --- The grid ---------------------------------------------------
-            let (w, h, _) = self.difficulty.params();
+            egui::ScrollArea::both().content_margin(0.5).show(ui, |ui| {
+                let (w, h, _) = self.difficulty.params();
 
-            // Reserve one rectangle for the whole board, then carve cells out of it.
-            let board_size = vec2(w as f32 * config::CELL_SIZE, h as f32 * config::CELL_SIZE);
-            let (board_rect, _) = ui.allocate_exact_size(board_size, Sense::hover());
+                // Reserve one rectangle for the whole board, then carve cells out of it.
+                let board_size = vec2(w as f32 * config::CELL_SIZE, h as f32 * config::CELL_SIZE);
+                let (board_rect, _) = ui.allocate_exact_size(board_size, Sense::hover());
 
-            for idx in 0..w * h {
-                let (x, y) = (idx % w, idx / w);
+                for idx in 0..w * h {
+                    let (x, y) = (idx % w, idx / w);
 
-                let top_left = board_rect.min
-                    + vec2(x as f32 * config::CELL_SIZE, y as f32 * config::CELL_SIZE);
-                // shrink() leaves a thin gap between cells, which acts as the grid lines.
-                let cell_rect =
-                    Rect::from_min_size(top_left, Vec2::splat(config::CELL_SIZE)).shrink(0.5);
+                    let top_left = board_rect.min
+                        + vec2(x as f32 * config::CELL_SIZE, y as f32 * config::CELL_SIZE);
+                    // shrink() leaves a thin gap between cells, which acts as the grid lines.
+                    let cell_rect =
+                        Rect::from_min_size(top_left, Vec2::splat(config::CELL_SIZE)).shrink(0.6);
 
-                // Each cell gets its own interaction response (needs a unique id).
-                let response =
-                    ui.interact(cell_rect, ui.scope_id().with(("cell", idx)), Sense::click());
+                    // Each cell gets its own interaction response (needs a unique id).
+                    let response =
+                        ui.interact(cell_rect, ui.scope_id().with(("cell", idx)), Sense::click());
 
-                // Before the first click there is no board, so everything is hidden.
-                let state = match &self.board {
-                    Some(board) => board.state(idx).unwrap(),
-                    None => CellState::Hidden,
-                };
+                    // Before the first click there is no board, so everything is hidden.
+                    let state = match &self.board {
+                        Some(board) => board.state(idx).unwrap(),
+                        None => CellState::Hidden,
+                    };
 
-                let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
+                    let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
 
-                paint_cell(
-                    ui,
-                    cell_rect,
-                    state,
-                    is_incorrectly_marked,
-                    response.hovered(),
-                );
+                    paint_cell(
+                        ui,
+                        cell_rect,
+                        state,
+                        is_incorrectly_marked,
+                        response.hovered(),
+                    );
 
-                if response.clicked() {
-                    self.on_cell_click(idx);
-                } else if response.secondary_clicked() {
-                    self.on_cell_flagged(idx);
+                    if response.clicked() {
+                        self.on_cell_click(idx);
+                    } else if response.secondary_clicked() {
+                        self.on_cell_flagged(idx);
+                    }
                 }
-            }
-
-            ui.horizontal(|ui| {
-                ui.label(format!(
-                    "Seed: {:x}x{:x}",
-                    self.get_seed(),
-                    self.get_start()
-                ));
-                ui.separator();
-                ui.label(self.status.label());
             });
 
             egui::warn_if_debug_build(ui);

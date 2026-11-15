@@ -8,6 +8,13 @@ pub struct App {
     pub board_type: BoardType,
     pub difficulty: Difficulty,
 
+    #[serde(skip)]
+    pub seed_mode: bool,
+    #[serde(skip)]
+    pub seed_input: String,
+    #[serde(skip)]
+    pub seed_errored: bool,
+
     /// `None` until the first click, because `Board::new` needs the start
     /// index in order to guarantee a safe first move.
     #[serde(skip)]
@@ -36,6 +43,53 @@ impl App {
     pub fn reset(&mut self) {
         self.board = None;
         self.status = GameStatus::Ready;
+    }
+
+    pub fn get_seed_str(&self) -> String {
+        format!(
+            "Seed: {:x}x{:x}{}",
+            self.get_seed(),
+            self.get_start(),
+            self.difficulty.to_rep()
+        )
+    }
+
+    pub fn parse_seed_str(&self, seed_str: &str) -> Option<(u64, usize, Difficulty)> {
+        let (rng_part, config_part) = seed_str.trim().split_once('x')?;
+        let (idx_part, difficulty_part) = config_part.split_at(config_part.len().checked_sub(1)?);
+
+        let rng_seed = u64::from_str_radix(rng_part, 16).ok()?;
+        let start_idx = idx_part.parse::<usize>().ok()?;
+        let difficulty = Difficulty::from_rep(difficulty_part)?;
+
+        Some((rng_seed, start_idx, difficulty))
+    }
+
+    pub fn start_from_seed(&mut self, seed_str: String) -> Result<(), BoardError> {
+        let (seed, start_idx, difficulty) = self
+            .parse_seed_str(&seed_str)
+            .ok_or(BoardError::InvalidInput)?;
+
+        self.reset();
+        self.difficulty = difficulty;
+        let (w, h, mines) = self.difficulty.params();
+        let board_gen: &'static dyn BoardGenerator = match self.board_type {
+            BoardType::Simple => &SimpleBoardGenerator,
+            BoardType::Solvable => &SolvableBoardGenerator,
+        };
+        let board = board_gen.generate_from_seed(
+            &BoardParams {
+                width: w,
+                height: h,
+                mine_count: mines,
+                start_idx,
+            },
+            seed,
+        )?;
+        self.board = Some(board);
+        self.status = GameStatus::Playing;
+
+        Ok(())
     }
 
     /// Left click on a cell.
