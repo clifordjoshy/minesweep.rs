@@ -3,7 +3,6 @@ pub const APP_NAME: &str = "minesweep.rs";
 /// Side length of one cell in screen points.
 pub const CELL_SIZE: f32 = 28.0;
 
-/// The three standard Minesweeper presets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
 pub enum Difficulty {
     #[default]
@@ -34,6 +33,22 @@ impl Difficulty {
     pub fn label(self) -> String {
         let (w, h, m) = self.params();
         format!("{:?} ({}x{}, {})", self, w, h, m)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+
+pub enum BoardType {
+    Simple,
+    #[default]
+    Solvable,
+}
+
+impl BoardType {
+    pub const ALL: [BoardType; 2] = [BoardType::Simple, BoardType::Solvable];
+
+    pub fn label(self) -> String {
+        format!("{:?}", self)
     }
 }
 

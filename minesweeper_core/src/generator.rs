@@ -10,18 +10,17 @@ use crate::{
 
 /// A strategy for producing a [`Board`].
 pub trait BoardGenerator {
-    fn generate_from_seed(&mut self, params: &BoardParams, seed: u64) -> Result<Board, BoardError>;
+    fn generate_from_seed(&self, params: &BoardParams, seed: u64) -> Result<Board, BoardError>;
 
-    fn generate(&mut self, params: &BoardParams) -> Result<Board, BoardError> {
+    fn generate(&self, params: &BoardParams) -> Result<Board, BoardError> {
         self.generate_from_seed(params, rand::random())
     }
 }
-
 /// Random mine placement that keeps `start_idx` safe. Might or might not be solvable.
 /// Similar to the original Minesweeper implementation
 pub struct SimpleBoardGenerator;
 impl BoardGenerator for SimpleBoardGenerator {
-    fn generate_from_seed(&mut self, params: &BoardParams, seed: u64) -> Result<Board, BoardError> {
+    fn generate_from_seed(&self, params: &BoardParams, seed: u64) -> Result<Board, BoardError> {
         Board::from_seed(params, seed)
     }
 }
@@ -30,11 +29,7 @@ impl BoardGenerator for SimpleBoardGenerator {
 /// logical deductions
 pub struct SolvableBoardGenerator;
 impl BoardGenerator for SolvableBoardGenerator {
-    fn generate_from_seed(
-        &mut self,
-        params: &BoardParams,
-        mut seed: u64,
-    ) -> Result<Board, BoardError> {
+    fn generate_from_seed(&self, params: &BoardParams, mut seed: u64) -> Result<Board, BoardError> {
         loop {
             let mut board = Board::from_seed(params, seed)?;
 

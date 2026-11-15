@@ -1,10 +1,11 @@
 use minesweeper_core::*;
 
-use crate::config::{Difficulty, GameStatus};
+use crate::config::{BoardType, Difficulty, GameStatus};
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct App {
+    pub board_type: BoardType,
     pub difficulty: Difficulty,
 
     /// `None` until the first click, because `Board::new` needs the start
@@ -46,7 +47,11 @@ impl App {
         let Some(board) = &mut self.board else {
             // First click: generate the board around the clicked cell.
             let (w, h, mines) = self.difficulty.params();
-            let Ok(board) = SolvableBoardGenerator.generate(&BoardParams {
+            let board_gen: &'static dyn BoardGenerator = match self.board_type {
+                BoardType::Simple => &SimpleBoardGenerator,
+                BoardType::Solvable => &SolvableBoardGenerator,
+            };
+            let Ok(board) = board_gen.generate(&BoardParams {
                 width: w,
                 height: h,
                 mine_count: mines,

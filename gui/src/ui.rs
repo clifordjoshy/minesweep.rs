@@ -1,8 +1,12 @@
-use egui::{Align2, Color32, FontId, Rect, Sense, Vec2, vec2};
-
 use crate::app;
 use crate::config;
+use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Shape, Stroke, Vec2, vec2};
 use minesweeper_core::{CellContent, CellState};
+
+enum Glyph {
+    Text(String, Color32),
+    Flag,
+}
 
 fn number_color(n: u8) -> Color32 {
     match n {
@@ -16,6 +20,32 @@ fn number_color(n: u8) -> Color32 {
         _ => Color32::GRAY,
     }
 }
+fn paint_flag(painter: &Painter, rect: Rect) {
+    // map fractional (0..1) coordinates in the cell to screen positions.
+    let p = |fx: f32, fy: f32| rect.min + vec2(fx * rect.width(), fy * rect.height());
+    let pole_color = Color32::from_gray(25);
+    let pole_w = rect.width() * 0.07;
+
+    // pole
+    painter.line_segment(
+        [p(0.52, 0.20), p(0.52, 0.78)],
+        Stroke::new(pole_w, pole_color),
+    );
+
+    // base
+    painter.rect_filled(
+        Rect::from_min_max(p(0.35, 0.78), p(0.68, 0.86)),
+        1.0,
+        pole_color,
+    );
+
+    // cloth
+    painter.add(Shape::convex_polygon(
+        vec![p(0.56, 0.16), p(0.56, 0.50), p(0.18, 0.35), p(0.18, 0.31)],
+        Color32::from_rgb(195, 19, 19),
+        Stroke::NONE,
+    ));
+}
 
 /// Paint a single cell: background colour plus an optional glyph.
 fn paint_cell(
@@ -27,7 +57,7 @@ fn paint_cell(
 ) {
     let painter = ui.painter();
 
-    let (bg, glyph): (Color32, Option<(String, Color32)>) = match state {
+    let (bg, glyph): (Color32, Option<Glyph>) = match state {
         CellState::Hidden => {
             let bg = if hovered {
                 Color32::from_gray(150)
@@ -36,22 +66,22 @@ fn paint_cell(
             };
             (bg, None)
         }
-        CellState::Flagged => (
-            Color32::from_gray(120),
-            Some(("F".to_owned(), Color32::from_rgb(220, 30, 30))),
-        ),
+        CellState::Flagged => (Color32::from_gray(120), Some(Glyph::Flag)),
         CellState::Revealed(content) => {
             let revealed_bg = Color32::from_gray(210);
             match content {
                 CellContent::Empty => (revealed_bg, None),
                 CellContent::Number(n) if incorrectly_marked => (
                     Color32::from_rgb(255, 195, 195),
-                    Some((n.to_string(), number_color(n))),
+                    Some(Glyph::Text(n.to_string(), number_color(n))),
                 ),
-                CellContent::Number(n) => (revealed_bg, Some((n.to_string(), number_color(n)))),
+                CellContent::Number(n) => (
+                    revealed_bg,
+                    Some(Glyph::Text(n.to_string(), number_color(n))),
+                ),
                 CellContent::Mine => (
                     Color32::from_rgb(200, 60, 60),
-                    Some(("*".to_owned(), Color32::BLACK)),
+                    Some(Glyph::Text("*".to_owned(), Color32::BLACK)),
                 ),
             }
         }
@@ -59,14 +89,18 @@ fn paint_cell(
 
     painter.rect_filled(rect, 2.0, bg);
 
-    if let Some((text, color)) = glyph {
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            FontId::monospace(config::CELL_SIZE * 0.6),
-            color,
-        );
+    match glyph {
+        Some(Glyph::Text(text, color)) => {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                text,
+                FontId::monospace(config::CELL_SIZE * 0.6),
+                color,
+            );
+        }
+        Some(Glyph::Flag) => paint_flag(painter, rect),
+        None => {}
     }
 }
 
@@ -91,6 +125,22 @@ impl eframe::App for app::App {
 
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading(config::APP_NAME);
+
+            // --- Controls: Board Type -------------
+            ui.horizontal(|ui| {
+                let mut changed = false;
+                for b in config::BoardType::ALL {
+                    if ui
+                        .selectable_value(&mut self.board_type, b, b.label())
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.reset();
+                }
+            });
 
             // --- Controls: difficulty picker + new game button -------------
             ui.horizontal(|ui| {
@@ -171,7 +221,7 @@ impl eframe::App for app::App {
 
             ui.horizontal(|ui| {
                 ui.label(format!(
-                    "Seed: {}, Start: {}",
+                    "Seed: {:x}x{:x}",
                     self.get_seed(),
                     self.get_start()
                 ));
