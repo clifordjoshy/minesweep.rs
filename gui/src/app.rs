@@ -161,7 +161,14 @@ impl App {
             seed,
         )?;
         self.board = Some(board);
-        self.update_game_status(ctx, GameStatus::Playing);
+        self.update_game_status(
+            ctx,
+            if self.board.as_ref().unwrap().is_won() {
+                GameStatus::Won
+            } else {
+                GameStatus::Playing
+            },
+        );
 
         Ok(())
     }
