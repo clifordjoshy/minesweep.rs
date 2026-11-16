@@ -108,6 +108,9 @@ impl eframe::App for app::App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
+                if let Some(icon) = &self.icon {
+                    ui.add(egui::Image::new(icon).max_height(18.0));
+                }
                 ui.heading(config::APP_NAME);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -215,7 +218,7 @@ impl eframe::App for app::App {
             });
 
             // --- Status line ------------------------------------------------
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(format!(
                     "Mines: {}/{}",
                     self.mines_remaining(),
@@ -250,7 +253,11 @@ impl eframe::App for app::App {
             ui.separator();
 
             // --- The grid ---------------------------------------------------
-            egui::ScrollArea::both().content_margin(0.5).show(ui, |ui| {
+            let scroll_style = &mut ui.style_mut().spacing.scroll;
+            scroll_style.floating = false;
+            scroll_style.bar_width = 2.0;
+
+            egui::ScrollArea::both().show(ui, |ui| {
                 let (w, h, _) = self.difficulty.params();
 
                 // Reserve one rectangle for the whole board, then carve cells out of it.

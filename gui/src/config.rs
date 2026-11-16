@@ -60,7 +60,7 @@ pub enum GameStatus {
 impl GameStatus {
     pub fn label(self) -> &'static str {
         match self {
-            GameStatus::Ready => "Click any cell to start (right-click to flag)",
+            GameStatus::Ready => "Click any cell to start.",
             GameStatus::Playing => "Good luck!",
             GameStatus::Won => "You win!",
             GameStatus::Lost => "Boom! You hit a mine.",

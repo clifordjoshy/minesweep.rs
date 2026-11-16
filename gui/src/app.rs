@@ -8,6 +8,9 @@ pub struct App {
     pub board_type: BoardType,
     pub difficulty: Difficulty,
 
+    #[serde(skip)]
+    pub icon: Option<egui::TextureHandle>,
+
     // seed input
     #[serde(skip)]
     pub seed_mode: bool,
@@ -34,6 +37,7 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         Self {
+            icon: None,
             board_type: BoardType::Solvable,
             difficulty: Difficulty::Intermediate,
             seed_mode: false,
@@ -55,11 +59,25 @@ impl App {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
-        if let Some(storage) = cc.storage {
+        let mut state: Self = if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
             Default::default()
+        };
+
+        if let Ok(icon_data) =
+            eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
+        {
+            state.icon = Some(cc.egui_ctx.load_texture(
+                "app_icon",
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [icon_data.width as usize, icon_data.height as usize],
+                    &icon_data.rgba,
+                ),
+                egui::TextureOptions::LINEAR,
+            ));
         }
+        state
     }
 
     /// Throw away the current game and go back to the "waiting for first click" state.
@@ -149,6 +167,9 @@ impl App {
     }
 
     pub fn update_game_status(&mut self, ctx: &egui::Ui, status: GameStatus) {
+        if self.status == status {
+            return;
+        }
         self.status = status;
         if status == GameStatus::Playing {
             self.timer_start = Some(ctx.time())
@@ -163,7 +184,15 @@ impl App {
             return;
         }
 
-        let Some(board) = &mut self.board else {
+        let open_res = if let Some(board) = &mut self.board {
+            match board.state(idx).unwrap() {
+                CellState::Flagged => BoardCellOpenResult::Noop,
+                CellState::Revealed(_) => board
+                    .chord_open_cell(idx)
+                    .unwrap_or(BoardCellOpenResult::Noop),
+                CellState::Hidden => board.open_cell(idx).unwrap_or(BoardCellOpenResult::Noop),
+            }
+        } else {
             // First click: generate the board around the clicked cell.
             let (w, h, mines) = self.difficulty.params();
             let board_gen: &'static dyn BoardGenerator = match self.board_type {
@@ -179,23 +208,20 @@ impl App {
                 return;
             };
             self.board = Some(board);
-            self.update_game_status(ctx, GameStatus::Playing);
-            return;
-        };
-
-        let open_res = match board.state(idx).unwrap() {
-            CellState::Flagged => Ok(BoardCellOpenResult::Noop),
-            CellState::Revealed(_) => board.chord_open_cell(idx),
-            CellState::Hidden => board.open_cell(idx),
-        };
-
-        if let Ok(result) = open_res {
-            if result == BoardCellOpenResult::MineExploded {
-                self.update_game_status(ctx, GameStatus::Lost);
-            } else if result == BoardCellOpenResult::AllMinesSweeped {
-                self.update_game_status(ctx, GameStatus::Won);
+            if self.board.as_ref().unwrap().is_won() {
+                BoardCellOpenResult::AllMinesSweeped
+            } else {
+                BoardCellOpenResult::Noop
             }
-        }
+        };
+        self.update_game_status(
+            ctx,
+            match open_res {
+                BoardCellOpenResult::AllMinesSweeped => GameStatus::Won,
+                BoardCellOpenResult::MineExploded => GameStatus::Lost,
+                _ => GameStatus::Playing,
+            },
+        );
     }
 
     /// Right click on a cell.
