@@ -4,87 +4,70 @@ use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Shape, Stroke, Vec2, v
 use minesweeper_core::{CellContent, CellState};
 
 enum Glyph {
-    Text(String, Color32),
+    Text(&'static str, Color32),
     Flag,
 }
-
-fn number_color(n: u8) -> Color32 {
-    match n {
-        1 => Color32::from_rgb(0, 0, 255),
-        2 => Color32::from_rgb(0, 128, 0),
-        3 => Color32::from_rgb(255, 0, 0),
-        4 => Color32::from_rgb(0, 0, 128),
-        5 => Color32::from_rgb(128, 0, 0),
-        6 => Color32::from_rgb(0, 128, 128),
-        7 => Color32::BLACK,
-        _ => Color32::GRAY,
-    }
-}
-fn paint_flag(painter: &Painter, rect: Rect) {
-    // map fractional (0..1) coordinates in the cell to screen positions.
+fn paint_flag(painter: &Painter, rect: Rect, colors: &config::Colors) {
     let p = |fx: f32, fy: f32| rect.min + vec2(fx * rect.width(), fy * rect.height());
-    let pole_color = Color32::from_gray(25);
     let pole_w = rect.width() * 0.07;
 
-    // pole
     painter.line_segment(
         [p(0.52, 0.20), p(0.52, 0.78)],
-        Stroke::new(pole_w, pole_color),
+        Stroke::new(pole_w, colors.flag_pole),
     );
-
-    // base
     painter.rect_filled(
         Rect::from_min_max(p(0.35, 0.78), p(0.68, 0.86)),
         1.0,
-        pole_color,
+        colors.flag_pole,
     );
-
-    // cloth
     painter.add(Shape::convex_polygon(
         vec![p(0.56, 0.16), p(0.56, 0.50), p(0.18, 0.35), p(0.18, 0.31)],
-        Color32::from_rgb(195, 19, 19),
+        colors.flag_cloth,
         Stroke::NONE,
     ));
 }
 
-/// Paint a single cell: background colour plus an optional glyph.
 fn paint_cell(
     ui: &egui::Ui,
     rect: Rect,
+    colors: &config::Colors,
     state: CellState,
     incorrectly_marked: bool,
-    hovered: bool,
+    highlighted: bool,
 ) {
     let painter = ui.painter();
 
     let (bg, glyph): (Color32, Option<Glyph>) = match state {
         CellState::Hidden => {
-            let bg = if hovered {
-                Color32::from_gray(150)
+            let bg = if highlighted {
+                colors.hidden_hover
             } else {
-                Color32::from_gray(120)
+                colors.hidden
             };
             (bg, None)
         }
-        CellState::Flagged => (Color32::from_gray(120), Some(Glyph::Flag)),
-        CellState::Revealed(content) => {
-            let revealed_bg = Color32::from_gray(210);
-            match content {
-                CellContent::Empty => (revealed_bg, None),
-                CellContent::Number(n) if incorrectly_marked => (
-                    Color32::from_rgb(255, 195, 195),
-                    Some(Glyph::Text(n.to_string(), number_color(n))),
-                ),
-                CellContent::Number(n) => (
-                    revealed_bg,
-                    Some(Glyph::Text(n.to_string(), number_color(n))),
-                ),
-                CellContent::Mine => (
-                    Color32::from_rgb(200, 60, 60),
-                    Some(Glyph::Text("*".to_owned(), Color32::BLACK)),
-                ),
+        CellState::Flagged => (colors.hidden, Some(Glyph::Flag)),
+        CellState::Revealed(content) => match content {
+            CellContent::Empty => (colors.revealed, None),
+            CellContent::Number(n) => {
+                let bg = if incorrectly_marked {
+                    colors.incorrect
+                } else {
+                    colors.revealed
+                };
+                (
+                    bg,
+                    Some(Glyph::Text(
+                        config::DIGITS_TEXT[n as usize],
+                        colors.number(n),
+                    )),
+                )
             }
-        }
+            CellContent::Mine => (
+                colors.mine_bg,
+                Some(Glyph::Text(config::MINE_TEXT, colors.mine_glyph)),
+            ),
+        },
     };
 
     painter.rect_filled(rect, 2.0, bg);
@@ -99,7 +82,7 @@ fn paint_cell(
                 color,
             );
         }
-        Some(Glyph::Flag) => paint_flag(painter, rect),
+        Some(Glyph::Flag) => paint_flag(painter, rect, colors),
         None => {}
     }
 }
@@ -107,6 +90,8 @@ fn paint_cell(
 impl eframe::App for app::App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ui, |ui| {
+            let colors = config::Colors::for_theme(ui.ctx().theme());
+
             ui.horizontal(|ui| {
                 if let Some(icon) = &self.icon {
                     ui.add(egui::Image::new(icon).max_height(18.0));
@@ -114,7 +99,21 @@ impl eframe::App for app::App {
                 ui.heading(config::APP_NAME);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    egui::widgets::global_theme_preference_buttons(ui);
+                    let is_dark = ui.ctx().theme() == egui::Theme::Dark;
+
+                    let (icon, tooltip) = if is_dark {
+                        ("☀️", "Switch to Light Mode")
+                    } else {
+                        ("🌙", "Switch to Dark Mode")
+                    };
+
+                    if ui.button(icon).on_hover_text(tooltip).clicked() {
+                        ui.ctx().set_theme(if is_dark {
+                            egui::Theme::Light
+                        } else {
+                            egui::Theme::Dark
+                        });
+                    }
                 });
             });
 
@@ -131,6 +130,7 @@ impl eframe::App for app::App {
                 }
                 if difficulty_changed {
                     self.reset();
+                    self.fit_window_to_board(ui);
                 }
             });
 
@@ -199,11 +199,10 @@ impl eframe::App for app::App {
                             self.seed_errored = false;
                         }
 
-                        let has_seed = self.seed_input.trim().len() > 16;
-
-                        if (ui.add_enabled(has_seed, egui::Button::new("Go")).clicked()
-                            || resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                            && has_seed
+                        if ui
+                            .add_enabled(!self.seed_input.is_empty(), egui::Button::new("Go"))
+                            .clicked()
+                            || resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
                         {
                             if self.start_from_repr(ui, self.seed_input.clone()).is_ok() {
                                 self.seed_errored = false;
@@ -219,31 +218,39 @@ impl eframe::App for app::App {
 
             // --- Status line ------------------------------------------------
             ui.horizontal_wrapped(|ui| {
-                ui.label(format!(
-                    "Mines: {}/{}",
-                    self.mines_remaining(),
-                    self.difficulty.params().2
-                ));
+                ui.label("Mines: ");
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{}/{}",
+                        self.mines_remaining(),
+                        self.difficulty.params().2
+                    ))
+                    .monospace(),
+                );
                 ui.separator();
+
+                ui.label("Time: ");
 
                 if let Some(start_time) = self.timer_start {
                     let total_secs = (ui.time() - start_time) as u64;
-                    let s = (total_secs % 60) as u8;
+                    let s = (total_secs % 60) as u32;
                     let m = ((total_secs / 60) % 60) as u8;
                     let h = (total_secs / 3600) as u8;
                     self.elapsed_time = format!("{:02}:{:02}:{:02}", h, m, s);
                     ui.request_repaint_after(std::time::Duration::from_secs(1));
                 }
-                ui.label(format!("Time: {}", self.elapsed_time));
+                ui.label(egui::RichText::new(self.elapsed_time.to_string()).monospace());
+
                 if self.status != config::GameStatus::Ready {
                     ui.separator();
-                    ui.label(self.to_repr());
+                    ui.label("Seed: ");
+                    ui.label(egui::RichText::new(self.to_repr()).monospace());
                 }
                 ui.separator();
                 ui.colored_label(
                     match self.status {
-                        config::GameStatus::Lost => ui.visuals().error_fg_color,
-                        config::GameStatus::Won => Color32::DARK_GREEN,
+                        config::GameStatus::Lost => colors.lost,
+                        config::GameStatus::Won => colors.won,
                         _ => ui.visuals().text_color(),
                     },
                     self.status.label(),
@@ -255,50 +262,74 @@ impl eframe::App for app::App {
             // --- The grid ---------------------------------------------------
             let scroll_style = &mut ui.style_mut().spacing.scroll;
             scroll_style.floating = false;
-            scroll_style.bar_width = 2.0;
+            scroll_style.bar_width = 4.0;
 
             egui::ScrollArea::both().show(ui, |ui| {
-                let (w, h, _) = self.difficulty.params();
+                ui.with_layout(
+                    egui::Layout::top_down_justified(egui::Align::Center),
+                    |ui| {
+                        let (w, h, _) = self.difficulty.params();
 
-                // Reserve one rectangle for the whole board, then carve cells out of it.
-                let board_size = vec2(w as f32 * config::CELL_SIZE, h as f32 * config::CELL_SIZE);
-                let (board_rect, _) = ui.allocate_exact_size(board_size, Sense::hover());
+                        let grid_colors = config::Colors::for_theme(ui.ctx().theme());
 
-                for idx in 0..w * h {
-                    let (x, y) = (idx % w, idx / w);
+                        // Reserve one rectangle for the whole board, then carve cells out of it.
+                        let board_size =
+                            vec2(w as f32 * config::CELL_SIZE, h as f32 * config::CELL_SIZE);
+                        let (board_rect, _) = ui.allocate_exact_size(board_size, Sense::hover());
 
-                    let top_left = board_rect.min
-                        + vec2(x as f32 * config::CELL_SIZE, y as f32 * config::CELL_SIZE);
-                    // shrink() leaves a thin gap between cells, which acts as the grid lines.
-                    let cell_rect =
-                        Rect::from_min_size(top_left, Vec2::splat(config::CELL_SIZE)).shrink(0.6);
+                        for idx in 0..w * h {
+                            let (x, y) = (idx % w, idx / w);
 
-                    // Each cell gets its own interaction response (needs a unique id).
-                    let response =
-                        ui.interact(cell_rect, ui.scope_id().with(("cell", idx)), Sense::click());
+                            let top_left = board_rect.min
+                                + vec2(x as f32 * config::CELL_SIZE, y as f32 * config::CELL_SIZE);
+                            // shrink() leaves a thin gap between cells, which acts as the grid lines.
+                            let cell_rect =
+                                Rect::from_min_size(top_left, Vec2::splat(config::CELL_SIZE))
+                                    .shrink(0.6);
 
-                    // Before the first click there is no board, so everything is hidden.
-                    let state = match &self.board {
-                        Some(board) => board.state(idx).unwrap(),
-                        None => CellState::Hidden,
-                    };
+                            // Each cell gets its own interaction response (needs a unique id).
+                            let response = ui.interact(
+                                cell_rect,
+                                ui.scope_id().with(("cell", idx)),
+                                Sense::click(),
+                            );
 
-                    let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
+                            // Before the first click there is no board, so everything is hidden.
+                            let state = match &self.board {
+                                Some(board) => board.state(idx).unwrap(),
+                                None => CellState::Hidden,
+                            };
 
-                    paint_cell(
-                        ui,
-                        cell_rect,
-                        state,
-                        is_incorrectly_marked,
-                        response.hovered(),
-                    );
+                            let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
 
-                    if response.clicked() {
-                        self.on_cell_click(ui, idx);
-                    } else if response.secondary_clicked() {
-                        self.on_cell_flagged(idx);
-                    }
-                }
+                            let is_highlighted = response.hovered()
+                                && matches!(
+                                    self.status,
+                                    config::GameStatus::Ready | config::GameStatus::Playing
+                                )
+                                && matches!(state, CellState::Hidden | CellState::Flagged);
+
+                            paint_cell(
+                                ui,
+                                cell_rect,
+                                grid_colors,
+                                state,
+                                is_incorrectly_marked,
+                                is_highlighted,
+                            );
+
+                            if is_highlighted {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+
+                            if response.clicked() {
+                                self.on_cell_click(ui, idx);
+                            } else if response.secondary_clicked() {
+                                self.on_cell_flagged(idx);
+                            }
+                        }
+                    },
+                );
             });
 
             egui::warn_if_debug_build(ui);
@@ -308,5 +339,34 @@ impl eframe::App for app::App {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
+    }
+}
+
+impl app::App {
+    fn fit_window_to_board(&self, ctx: &egui::Context) {
+        let (maximized, fullscreen, minimized) = ctx.input(|i| {
+            let vp = i.viewport();
+            (vp.maximized, vp.fullscreen, vp.minimized)
+        });
+        if maximized == Some(true) || fullscreen == Some(true) || minimized == Some(true) {
+            return;
+        }
+
+        let (w, h, _) = self.difficulty.params();
+        let mut needed = egui::vec2(
+            w as f32 * config::CELL_SIZE + 24.0,
+            h as f32 * config::CELL_SIZE + 150.0,
+        );
+        let current = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size()));
+        let monitor = ctx.input(|i| i.viewport().monitor_size);
+
+        if let Some(cur) = current {
+            if let Some(m) = monitor {
+                needed = needed.min(m * 0.95); // don't exceed the screen
+            }
+            if needed != cur {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(needed));
+            }
+        }
     }
 }

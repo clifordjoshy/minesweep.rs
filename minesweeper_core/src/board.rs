@@ -313,10 +313,10 @@ impl Board {
     pub(crate) fn move_mine(&mut self, source_idx: usize, dest_idx: usize) {
         assert!(self.content_grid[source_idx] == CellContent::Mine);
         assert!(self.content_grid[dest_idx] != CellContent::Mine);
-
         assert!(!self.is_in_start_region(dest_idx));
 
         self.content_grid[dest_idx] = CellContent::Mine;
+        self.rehide_cell(dest_idx);
         self.content_grid[source_idx] = match self
             .neighbours_of(source_idx, 1)
             .filter(|&i| i != dest_idx && self.content_grid[i] == CellContent::Mine)
@@ -326,49 +326,39 @@ impl Board {
             mc => CellContent::Number(mc as u8),
         };
         self.rehide_cell(source_idx);
-        self.rehide_cell(dest_idx);
-
-        // once we move mines from A to B, the neighbours of A can drop to 0.
-        // if that were the case, we need to reopen all of those neighbours
-        // if they were already open (since it would have flood filled if
-        // not for the mine). additionally, anything in the start region will
-        // need to be re-opened.
-        let mut cells_to_reopen = Vec::<usize>::new();
-
         for i in self.neighbours_of(source_idx, 1) {
-            match self.content_grid[i] {
+            self.content_grid[i] = match self.content_grid[i] {
                 CellContent::Mine => continue,
-                CellContent::Number(n) if n > 1 => {
-                    self.content_grid[i] = CellContent::Number(n - 1);
-                }
-                CellContent::Number(_) => {
-                    self.content_grid[i] = CellContent::Empty;
-                    if matches!(self.state_grid[i], CellState::Revealed(_)) {
-                        cells_to_reopen.push(i);
-                    }
-                }
+                CellContent::Number(n) if n > 1 => CellContent::Number(n - 1),
+                CellContent::Number(_) => CellContent::Empty,
                 CellContent::Empty => unreachable!(),
             };
-            if self.is_in_start_region(i) {
-                cells_to_reopen.push(i);
-            }
             self.rehide_cell(i);
         }
         for i in self.neighbours_of(dest_idx, 1) {
-            match self.content_grid[i] {
+            self.content_grid[i] = match self.content_grid[i] {
                 CellContent::Mine => continue,
-                CellContent::Empty => self.content_grid[i] = CellContent::Number(1),
-                CellContent::Number(n) => self.content_grid[i] = CellContent::Number(n + 1),
+                CellContent::Empty => CellContent::Number(1),
+                CellContent::Number(n) => CellContent::Number(n + 1),
             };
-            if self.is_in_start_region(i) {
-                cells_to_reopen.push(i);
-            }
             self.rehide_cell(i);
         }
 
-        for c in cells_to_reopen {
-            self.open_cell(c).unwrap();
-        }
+        // any hidden safe cell next to a revealed empty cell would have been flood
+        // opened. let's reopen those now. (this handles reopening the start region too)
+        std::iter::once(source_idx)
+            .chain(self.neighbours_of(source_idx, 1))
+            .chain(std::iter::once(dest_idx))
+            .chain(self.neighbours_of(dest_idx, 1))
+            .for_each(|i| {
+                if self.content_grid[i] != CellContent::Mine
+                    && self
+                        .neighbours_of(i, 1)
+                        .any(|j| self.state_grid[j] == CellState::Revealed(CellContent::Empty))
+                {
+                    self.open_cell(i).unwrap();
+                }
+            });
     }
 
     pub fn reset_state(&mut self) {

@@ -1,6 +1,6 @@
 use minesweeper_core::*;
 
-use crate::config::{BoardType, Difficulty, GameStatus};
+use crate::config::{self, BoardType, Difficulty, GameStatus};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -39,12 +39,12 @@ impl Default for App {
         Self {
             icon: None,
             board_type: BoardType::Solvable,
-            difficulty: Difficulty::Intermediate,
+            difficulty: config::DEFAULT_DIFFICULTY,
             seed_mode: false,
             seed_input: Default::default(),
             seed_errored: false,
             timer_start: None,
-            elapsed_time: "00:00:00".to_owned(),
+            elapsed_time: String::from("00:00:00"),
             board: None,
             status: GameStatus::Ready,
         }
@@ -62,6 +62,7 @@ impl App {
         let mut state: Self = if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
+            cc.egui_ctx.set_theme(config::DEFAULT_THEME);
             Default::default()
         };
 
@@ -85,7 +86,7 @@ impl App {
         self.board = None;
         self.status = GameStatus::Ready;
         self.timer_start = None;
-        self.elapsed_time = "00:00:00".to_owned();
+        self.elapsed_time = String::from("00:00:00");
     }
 
     pub fn to_repr(&self) -> String {
@@ -99,16 +100,10 @@ impl App {
             BoardType::Simple => "0",
             BoardType::Solvable => "1",
         };
-        format!(
-            "Seed: {:x}x{:x}{}{}",
-            self.get_seed(),
-            self.get_start(),
-            d,
-            b
-        )
+        format!("{:x}x{:x}{}{}", self.get_seed(), self.get_start(), d, b)
     }
 
-    pub fn parse_repr(&self, seed_str: &str) -> Option<(u64, usize, Difficulty, BoardType)> {
+    pub fn parse_repr(seed_str: &str) -> Option<(u64, usize, Difficulty, BoardType)> {
         let (rng_part, config_part) = seed_str.trim().split_once('x')?;
 
         let l = config_part.len();
@@ -139,19 +134,15 @@ impl App {
         Some((rng_seed, start_idx, difficulty, board_type))
     }
 
-    pub fn start_from_repr(&mut self, ctx: &egui::Ui, seed_str: String) -> Result<(), BoardError> {
+    pub fn start_from_repr(&mut self, ui: &egui::Ui, seed_str: String) -> Result<(), BoardError> {
         let (seed, start_idx, difficulty, board_type) =
-            self.parse_repr(&seed_str).ok_or(BoardError::InvalidInput)?;
+            Self::parse_repr(&seed_str).ok_or(BoardError::InvalidInput)?;
 
         self.reset();
         self.difficulty = difficulty;
         self.board_type = board_type;
         let (w, h, mines) = self.difficulty.params();
-        let board_gen: &'static dyn BoardGenerator = match self.board_type {
-            BoardType::Simple => &SimpleBoardGenerator,
-            BoardType::Solvable => &SolvableBoardGenerator,
-        };
-        let board = board_gen.generate_from_seed(
+        let board = self.board_type.generator().generate_from_seed(
             &BoardParams {
                 width: w,
                 height: h,
@@ -160,10 +151,11 @@ impl App {
             },
             seed,
         )?;
+        let is_won = board.is_won();
         self.board = Some(board);
         self.update_game_status(
-            ctx,
-            if self.board.as_ref().unwrap().is_won() {
+            ui,
+            if is_won {
                 GameStatus::Won
             } else {
                 GameStatus::Playing
@@ -173,20 +165,20 @@ impl App {
         Ok(())
     }
 
-    pub fn update_game_status(&mut self, ctx: &egui::Ui, status: GameStatus) {
+    pub fn update_game_status(&mut self, ui: &egui::Ui, status: GameStatus) {
         if self.status == status {
             return;
         }
         self.status = status;
         if status == GameStatus::Playing {
-            self.timer_start = Some(ctx.time())
+            self.timer_start = Some(ui.time())
         } else {
             self.timer_start = None;
         }
     }
 
     /// Left click on a cell.
-    pub fn on_cell_click(&mut self, ctx: &egui::Ui, idx: usize) {
+    pub fn on_cell_click(&mut self, ui: &egui::Ui, idx: usize) {
         if matches!(self.status, GameStatus::Won | GameStatus::Lost) {
             return;
         }
@@ -202,11 +194,7 @@ impl App {
         } else {
             // First click: generate the board around the clicked cell.
             let (w, h, mines) = self.difficulty.params();
-            let board_gen: &'static dyn BoardGenerator = match self.board_type {
-                BoardType::Simple => &SimpleBoardGenerator,
-                BoardType::Solvable => &SolvableBoardGenerator,
-            };
-            let Ok(board) = board_gen.generate(&BoardParams {
+            let Ok(board) = self.board_type.generator().generate(&BoardParams {
                 width: w,
                 height: h,
                 mine_count: mines,
@@ -214,15 +202,16 @@ impl App {
             }) else {
                 return;
             };
+            let is_won_already = board.is_won();
             self.board = Some(board);
-            if self.board.as_ref().unwrap().is_won() {
+            if is_won_already {
                 BoardCellOpenResult::AllMinesSweeped
             } else {
                 BoardCellOpenResult::Noop
             }
         };
         self.update_game_status(
-            ctx,
+            ui,
             match open_res {
                 BoardCellOpenResult::AllMinesSweeped => GameStatus::Won,
                 BoardCellOpenResult::MineExploded => GameStatus::Lost,
