@@ -295,8 +295,6 @@ impl Board {
     }
 
     fn rehide_cell(&mut self, idx: usize) {
-        assert!(!self.is_in_start_region(idx));
-
         match self.state_grid[idx] {
             CellState::Hidden => return,
             CellState::Flagged => self.flagged_count -= 1,
@@ -330,20 +328,31 @@ impl Board {
         self.rehide_cell(source_idx);
         self.rehide_cell(dest_idx);
 
+        // once we move mines from A to B, the neighbours of A can drop to 0.
+        // if that were the case, we need to reopen all of those neighbours
+        // if they were already open (since it would have flood filled if
+        // not for the mine). additionally, anything in the start region will
+        // need to be re-opened.
+        let mut cells_to_reopen = Vec::<usize>::new();
+
         for i in self.neighbours_of(source_idx, 1) {
             match self.content_grid[i] {
                 CellContent::Mine => continue,
                 CellContent::Number(n) if n > 1 => {
                     self.content_grid[i] = CellContent::Number(n - 1);
                 }
-                CellContent::Number(_) => self.content_grid[i] = CellContent::Empty,
+                CellContent::Number(_) => {
+                    self.content_grid[i] = CellContent::Empty;
+                    if matches!(self.state_grid[i], CellState::Revealed(_)) {
+                        cells_to_reopen.push(i);
+                    }
+                }
                 CellContent::Empty => unreachable!(),
             };
-            if !self.is_in_start_region(i) {
-                self.rehide_cell(i);
-            } else {
-                self.state_grid[i] = CellState::Revealed(self.content_grid[i]);
+            if self.is_in_start_region(i) {
+                cells_to_reopen.push(i);
             }
+            self.rehide_cell(i);
         }
         for i in self.neighbours_of(dest_idx, 1) {
             match self.content_grid[i] {
@@ -351,11 +360,14 @@ impl Board {
                 CellContent::Empty => self.content_grid[i] = CellContent::Number(1),
                 CellContent::Number(n) => self.content_grid[i] = CellContent::Number(n + 1),
             };
-            if !self.is_in_start_region(i) {
-                self.rehide_cell(i);
-            } else {
-                self.state_grid[i] = CellState::Revealed(self.content_grid[i]);
+            if self.is_in_start_region(i) {
+                cells_to_reopen.push(i);
             }
+            self.rehide_cell(i);
+        }
+
+        for c in cells_to_reopen {
+            self.open_cell(c).unwrap();
         }
     }
 

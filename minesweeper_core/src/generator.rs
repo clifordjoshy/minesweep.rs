@@ -33,7 +33,7 @@ impl BoardGenerator for SolvableBoardGenerator {
         loop {
             let mut board = Board::from_seed(params, seed)?;
 
-            if solver::solve_board(&mut board, vec![params.start_idx]) == SolverResult::Solved
+            if solver::solve_board(&mut board, &[params.start_idx]) == SolverResult::Solved
                 || self.perturb_and_solve_board(&mut board) == SolverResult::Solved
             {
                 board.reset_state();
@@ -70,7 +70,7 @@ impl SolvableBoardGenerator {
 
             if is_still_guaranteed_solvable || {
                 board.reset_state();
-                solver::solve_board(board, vec![board.start_idx]) == SolverResult::Solved
+                solver::solve_board(board, &[board.start_idx]) == SolverResult::Solved
             } {
                 return SolverResult::Solved;
             }
@@ -140,7 +140,7 @@ impl SolvableBoardGenerator {
                 let modified_indices = self.handle_enclosed_regions(board, rng);
                 nperturbs += 1;
                 could_have_messed_up_existing = true;
-                if solver::solve_board(board, modified_indices) == SolverResult::Solved {
+                if solver::solve_board(board, &modified_indices) == SolverResult::Solved {
                     return (nperturbs, false);
                 }
                 continue;
@@ -252,7 +252,7 @@ impl SolvableBoardGenerator {
                 }
                 pmines
             };
-            if solver::solve_board(board, modified_indices) == SolverResult::Solved {
+            if solver::solve_board(board, &modified_indices) == SolverResult::Solved {
                 return (nperturbs, !could_have_messed_up_existing);
             }
         }

@@ -199,7 +199,7 @@ impl eframe::App for app::App {
                             self.seed_errored = false;
                         }
 
-                        let has_seed = !self.seed_input.trim().len() > 16;
+                        let has_seed = self.seed_input.trim().len() > 16;
 
                         if (ui.add_enabled(has_seed, egui::Button::new("Go")).clicked()
                             || resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))

@@ -11,7 +11,7 @@ pub enum SolverResult {
     Solved,
 }
 
-pub fn solve_board(board: &mut Board, start_from: Vec<usize>) -> SolverResult {
+pub fn solve_board(board: &mut Board, start_from: &[usize]) -> SolverResult {
     // queue of indices that might be relevant (neighbours of any actioned index)
     let mut relevant_queue = VecDeque::<usize>::new();
 
@@ -22,8 +22,8 @@ pub fn solve_board(board: &mut Board, start_from: Vec<usize>) -> SolverResult {
         ($idxs:expr) => {
             relevant_queue.extend(
                 $idxs
-                    .into_iter()
-                    .flat_map(|i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
+                    .iter()
+                    .flat_map(|&i| std::iter::once(i).chain(board.neighbours_of(i, 2)))
                     .filter(|&i| matches!(board[i], CellState::Revealed(_)))
                     .filter(|&i| !std::mem::replace(&mut in_queue[i], true)),
             );
