@@ -8,17 +8,9 @@ mod ui;
 fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
-    let (w, h, _) = config::DEFAULT_DIFFICULTY.params();
-    let padding = 24.0;
-    let header_h = 160.0;
-    let initial = egui::vec2(
-        w as f32 * config::CELL_SIZE + padding,
-        h as f32 * config::CELL_SIZE + header_h,
-    );
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size(initial)
-            .with_min_inner_size(initial)
+            .with_min_inner_size([350., 400.])
             .with_icon(
                 eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
                     .expect("Failed to load icon"),
@@ -28,7 +20,12 @@ fn main() -> eframe::Result {
     eframe::run_native(
         config::APP_NAME,
         native_options,
-        Box::new(|cc| Ok(Box::new(app::App::new(cc)))),
+        Box::new(|cc| {
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            let app = app::App::new(cc);
+            app.fit_window_to_board(&cc.egui_ctx);
+            Ok(Box::new(app))
+        }),
     )
 }
 

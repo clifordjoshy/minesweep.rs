@@ -8,9 +8,6 @@ pub struct App {
     pub board_type: BoardType,
     pub difficulty: Difficulty,
 
-    #[serde(skip)]
-    pub icon: Option<egui::TextureHandle>,
-
     // seed input
     #[serde(skip)]
     pub seed_mode: bool,
@@ -22,11 +19,7 @@ pub struct App {
     // timer
     #[serde(skip)]
     pub timer_start: Option<f64>,
-    #[serde(skip)]
-    pub elapsed_time: String,
 
-    /// `None` until the first click, because `Board::new` needs the start
-    /// index in order to guarantee a safe first move.
     #[serde(skip)]
     pub board: Option<Board>,
 
@@ -37,14 +30,12 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         Self {
-            icon: None,
             board_type: BoardType::Solvable,
             difficulty: config::DEFAULT_DIFFICULTY,
             seed_mode: false,
             seed_input: Default::default(),
             seed_errored: false,
             timer_start: None,
-            elapsed_time: String::from("00:00:00"),
             board: None,
             status: GameStatus::Ready,
         }
@@ -58,27 +49,12 @@ impl App {
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
         // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
-        let mut state: Self = if let Some(storage) = cc.storage {
-            eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
-        } else {
-            cc.egui_ctx.set_theme(config::DEFAULT_THEME);
-            Default::default()
-        };
-
-        if let Ok(icon_data) =
-            eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
-        {
-            state.icon = Some(cc.egui_ctx.load_texture(
-                "app_icon",
-                egui::ColorImage::from_rgba_unmultiplied(
-                    [icon_data.width as usize, icon_data.height as usize],
-                    &icon_data.rgba,
-                ),
-                egui::TextureOptions::LINEAR,
-            ));
-        }
-        state
+        cc.storage
+            .and_then(|storage| eframe::get_value(storage, eframe::APP_KEY))
+            .unwrap_or_else(|| {
+                cc.egui_ctx.set_theme(config::DEFAULT_THEME);
+                Default::default()
+            })
     }
 
     /// Throw away the current game and go back to the "waiting for first click" state.
@@ -86,73 +62,30 @@ impl App {
         self.board = None;
         self.status = GameStatus::Ready;
         self.timer_start = None;
-        self.elapsed_time = String::from("00:00:00");
-    }
-
-    pub fn to_repr(&self) -> String {
-        let d = match self.difficulty {
-            Difficulty::Beginner => "b",
-            Difficulty::Intermediate => "i",
-            Difficulty::Expert => "e",
-            Difficulty::Master => "m",
-        };
-        let b = match self.board_type {
-            BoardType::Simple => "0",
-            BoardType::Solvable => "1",
-        };
-        format!("{:x}x{:x}{}{}", self.get_seed(), self.get_start(), d, b)
-    }
-
-    pub fn parse_repr(seed_str: &str) -> Option<(u64, usize, Difficulty, BoardType)> {
-        let (rng_part, config_part) = seed_str.trim().split_once('x')?;
-
-        let l = config_part.len();
-        if l < 3 {
-            return None;
-        }
-        let idx_part = &config_part[..l - 2];
-        let d = &config_part[l - 2..l - 1];
-        let b = &config_part[l - 1..];
-
-        let rng_seed = u64::from_str_radix(rng_part, 16).ok()?;
-        let start_idx = usize::from_str_radix(idx_part, 16).ok()?;
-
-        let difficulty = match d {
-            "b" => Difficulty::Beginner,
-            "i" => Difficulty::Intermediate,
-            "e" => Difficulty::Expert,
-            "m" => Difficulty::Master,
-            _ => return None,
-        };
-
-        let board_type = match b {
-            "0" => BoardType::Simple,
-            "1" => BoardType::Solvable,
-            _ => return None,
-        };
-
-        Some((rng_seed, start_idx, difficulty, board_type))
     }
 
     pub fn start_from_repr(&mut self, ui: &egui::Ui, seed_str: String) -> Result<(), BoardError> {
-        let (seed, start_idx, difficulty, board_type) =
-            Self::parse_repr(&seed_str).ok_or(BoardError::InvalidInput)?;
+        let game_seed = seed_str
+            .parse::<config::GameSeed>()
+            .map_err(|_| BoardError::InvalidInput)?;
+        let (w, h, mines) = game_seed.difficulty.params();
 
-        self.reset();
-        self.difficulty = difficulty;
-        self.board_type = board_type;
-        let (w, h, mines) = self.difficulty.params();
         let board = self.board_type.generator().generate_from_seed(
             &BoardParams {
                 width: w,
                 height: h,
                 mine_count: mines,
-                start_idx,
+                start_idx: game_seed.start_idx,
             },
-            seed,
+            game_seed.rng_seed,
         )?;
+        self.reset();
+        self.difficulty = game_seed.difficulty;
+        self.fit_window_to_board(ui);
+        self.board_type = game_seed.board_type;
         let is_won = board.is_won();
         self.board = Some(board);
+
         self.update_game_status(
             ui,
             if is_won {

@@ -95,9 +95,10 @@ impl eframe::App for app::App {
             ui.spacing_mut().item_spacing.y = 5.;
 
             ui.horizontal(|ui| {
-                if let Some(icon) = &self.icon {
-                    ui.add(egui::Image::new(icon).max_height(18.0));
-                }
+                ui.add(
+                    egui::Image::new(egui::include_image!("../assets/icon.svg"))
+                        .max_height(ui.text_style_height(&egui::TextStyle::Heading)),
+                );
                 ui.heading(config::APP_NAME);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -195,7 +196,7 @@ impl eframe::App for app::App {
                             .hint_text("start from seed")
                             .desired_width(150.0);
                         if self.seed_errored {
-                            textin = textin.text_color(egui::Color32::LIGHT_RED);
+                            textin = textin.text_color(colors.lost);
                         }
                         let resp = ui.add(textin);
                         if resp.changed() {
@@ -245,17 +246,31 @@ impl eframe::App for app::App {
                             let s = (total_secs % 60) as u32;
                             let m = ((total_secs / 60) % 60) as u8;
                             let h = (total_secs / 3600) as u8;
-                            self.elapsed_time = format!("{:02}:{:02}:{:02}", h, m, s);
+                            ui.label(
+                                egui::RichText::new(format!("{:02}:{:02}:{:02}", h, m, s))
+                                    .monospace(),
+                            );
                             ui.request_repaint_after(std::time::Duration::from_secs(1));
                         }
-                        ui.label(egui::RichText::new(self.elapsed_time.to_string()).monospace());
                     });
 
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.label("Seed: ");
-                        ui.label(egui::RichText::new(self.to_repr()).monospace().small());
+                        ui.label(
+                            egui::RichText::new(
+                                config::GameSeed {
+                                    difficulty: self.difficulty,
+                                    board_type: self.board_type,
+                                    rng_seed: self.get_seed(),
+                                    start_idx: self.get_start(),
+                                }
+                                .to_string(),
+                            )
+                            .monospace()
+                            .small(),
+                        );
                     });
                     ui.separator();
                 }
@@ -279,7 +294,6 @@ impl eframe::App for app::App {
 
             let (w, h, _) = self.difficulty.params();
 
-            let grid_colors = config::Colors::for_theme(ui.ctx().theme());
             // Reserve one rectangle for the whole board, then carve cells out of it.
             let board_size = vec2(w as f32 * config::CELL_SIZE, h as f32 * config::CELL_SIZE);
             let available = ui.available_size();
@@ -329,7 +343,7 @@ impl eframe::App for app::App {
                     paint_cell(
                         ui,
                         cell_rect,
-                        grid_colors,
+                        colors,
                         state,
                         is_incorrectly_marked,
                         is_highlighted,
@@ -358,7 +372,7 @@ impl eframe::App for app::App {
 }
 
 impl app::App {
-    fn fit_window_to_board(&self, ctx: &egui::Context) {
+    pub fn fit_window_to_board(&self, ctx: &egui::Context) {
         let (maximized, fullscreen, minimized) = ctx.input(|i| {
             let vp = i.viewport();
             (vp.maximized, vp.fullscreen, vp.minimized)
