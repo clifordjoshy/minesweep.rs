@@ -92,6 +92,8 @@ impl eframe::App for app::App {
         egui::CentralPanel::default().show(ui, |ui| {
             let colors = config::Colors::for_theme(ui.ctx().theme());
 
+            ui.spacing_mut().item_spacing.y = 5.;
+
             ui.horizontal(|ui| {
                 if let Some(icon) = &self.icon {
                     ui.add(egui::Image::new(icon).max_height(18.0));
@@ -150,6 +152,7 @@ impl eframe::App for app::App {
                 }
 
                 ui.separator();
+                ui.add_space(ui.spacing().item_spacing.x);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -218,35 +221,45 @@ impl eframe::App for app::App {
 
             // --- Status line ------------------------------------------------
             ui.horizontal_wrapped(|ui| {
-                ui.label("Mines: ");
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{}/{}",
-                        self.mines_remaining(),
-                        self.difficulty.params().2
-                    ))
-                    .monospace(),
-                );
-                ui.separator();
-
-                ui.label("Time: ");
-
-                if let Some(start_time) = self.timer_start {
-                    let total_secs = (ui.time() - start_time) as u64;
-                    let s = (total_secs % 60) as u32;
-                    let m = ((total_secs / 60) % 60) as u8;
-                    let h = (total_secs / 3600) as u8;
-                    self.elapsed_time = format!("{:02}:{:02}:{:02}", h, m, s);
-                    ui.request_repaint_after(std::time::Duration::from_secs(1));
-                }
-                ui.label(egui::RichText::new(self.elapsed_time.to_string()).monospace());
-
                 if self.status != config::GameStatus::Ready {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.;
+                        ui.label("Mines: ");
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{}/{}",
+                                self.mines_remaining(),
+                                self.difficulty.params().2
+                            ))
+                            .monospace(),
+                        );
+                    });
+
                     ui.separator();
-                    ui.label("Seed: ");
-                    ui.label(egui::RichText::new(self.to_repr()).monospace());
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.;
+                        ui.label("Time: ");
+
+                        if let Some(start_time) = self.timer_start {
+                            let total_secs = (ui.time() - start_time) as u64;
+                            let s = (total_secs % 60) as u32;
+                            let m = ((total_secs / 60) % 60) as u8;
+                            let h = (total_secs / 3600) as u8;
+                            self.elapsed_time = format!("{:02}:{:02}:{:02}", h, m, s);
+                            ui.request_repaint_after(std::time::Duration::from_secs(1));
+                        }
+                        ui.label(egui::RichText::new(self.elapsed_time.to_string()).monospace());
+                    });
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.;
+                        ui.label("Seed: ");
+                        ui.label(egui::RichText::new(self.to_repr()).monospace().small());
+                    });
+                    ui.separator();
                 }
-                ui.separator();
+
                 ui.colored_label(
                     match self.status {
                         config::GameStatus::Lost => colors.lost,
@@ -264,72 +277,74 @@ impl eframe::App for app::App {
             scroll_style.floating = false;
             scroll_style.bar_width = 4.0;
 
+            let (w, h, _) = self.difficulty.params();
+
+            let grid_colors = config::Colors::for_theme(ui.ctx().theme());
+            // Reserve one rectangle for the whole board, then carve cells out of it.
+            let board_size = vec2(w as f32 * config::CELL_SIZE, h as f32 * config::CELL_SIZE);
+            let available = ui.available_size();
+
+            let pad_x = ((available.x - board_size.x) * 0.5).max(0.0);
+            let pad_y =
+                (((available.y - board_size.y) * 0.5) - ui.spacing().item_spacing.y).max(0.0);
+
             egui::ScrollArea::both().show(ui, |ui| {
-                ui.with_layout(
-                    egui::Layout::top_down_justified(egui::Align::Center),
-                    |ui| {
-                        let (w, h, _) = self.difficulty.params();
+                ui.spacing_mut().item_spacing.y = 0.;
+                ui.spacing_mut().item_spacing.x = 0.;
+                ui.add_space(pad_y);
+                let (board_rect, _) = ui.allocate_exact_size(board_size, Sense::hover());
 
-                        let grid_colors = config::Colors::for_theme(ui.ctx().theme());
+                for idx in 0..w * h {
+                    let (x, y) = (idx % w, idx / w);
 
-                        // Reserve one rectangle for the whole board, then carve cells out of it.
-                        let board_size =
-                            vec2(w as f32 * config::CELL_SIZE, h as f32 * config::CELL_SIZE);
-                        let (board_rect, _) = ui.allocate_exact_size(board_size, Sense::hover());
+                    let top_left = board_rect.min
+                        + vec2(
+                            pad_x + x as f32 * config::CELL_SIZE,
+                            y as f32 * config::CELL_SIZE,
+                        );
 
-                        for idx in 0..w * h {
-                            let (x, y) = (idx % w, idx / w);
+                    // shrink() leaves a thin gap between cells, which acts as the grid lines.
+                    let cell_rect =
+                        Rect::from_min_size(top_left, Vec2::splat(config::CELL_SIZE)).shrink(0.6);
 
-                            let top_left = board_rect.min
-                                + vec2(x as f32 * config::CELL_SIZE, y as f32 * config::CELL_SIZE);
-                            // shrink() leaves a thin gap between cells, which acts as the grid lines.
-                            let cell_rect =
-                                Rect::from_min_size(top_left, Vec2::splat(config::CELL_SIZE))
-                                    .shrink(0.6);
+                    // Each cell gets its own interaction response (needs a unique id).
+                    let response =
+                        ui.interact(cell_rect, ui.scope_id().with(("cell", idx)), Sense::click());
 
-                            // Each cell gets its own interaction response (needs a unique id).
-                            let response = ui.interact(
-                                cell_rect,
-                                ui.scope_id().with(("cell", idx)),
-                                Sense::click(),
-                            );
+                    // Before the first click there is no board, so everything is hidden.
+                    let state = match &self.board {
+                        Some(board) => board.state(idx).unwrap(),
+                        None => CellState::Hidden,
+                    };
 
-                            // Before the first click there is no board, so everything is hidden.
-                            let state = match &self.board {
-                                Some(board) => board.state(idx).unwrap(),
-                                None => CellState::Hidden,
-                            };
+                    let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
 
-                            let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
+                    let is_highlighted = response.hovered()
+                        && matches!(
+                            self.status,
+                            config::GameStatus::Ready | config::GameStatus::Playing
+                        )
+                        && matches!(state, CellState::Hidden | CellState::Flagged);
 
-                            let is_highlighted = response.hovered()
-                                && matches!(
-                                    self.status,
-                                    config::GameStatus::Ready | config::GameStatus::Playing
-                                )
-                                && matches!(state, CellState::Hidden | CellState::Flagged);
+                    paint_cell(
+                        ui,
+                        cell_rect,
+                        grid_colors,
+                        state,
+                        is_incorrectly_marked,
+                        is_highlighted,
+                    );
 
-                            paint_cell(
-                                ui,
-                                cell_rect,
-                                grid_colors,
-                                state,
-                                is_incorrectly_marked,
-                                is_highlighted,
-                            );
+                    if is_highlighted {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
 
-                            if is_highlighted {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                            }
-
-                            if response.clicked() {
-                                self.on_cell_click(ui, idx);
-                            } else if response.secondary_clicked() {
-                                self.on_cell_flagged(idx);
-                            }
-                        }
-                    },
-                );
+                    if response.clicked() {
+                        self.on_cell_click(ui, idx);
+                    } else if response.secondary_clicked() {
+                        self.on_cell_flagged(idx);
+                    }
+                }
             });
 
             egui::warn_if_debug_build(ui);
@@ -355,7 +370,7 @@ impl app::App {
         let (w, h, _) = self.difficulty.params();
         let mut needed = egui::vec2(
             w as f32 * config::CELL_SIZE + 24.0,
-            h as f32 * config::CELL_SIZE + 150.0,
+            h as f32 * config::CELL_SIZE + 160.0,
         );
         let current = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size()));
         let monitor = ctx.input(|i| i.viewport().monitor_size);

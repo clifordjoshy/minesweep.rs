@@ -10,7 +10,7 @@ fn main() -> eframe::Result {
 
     let (w, h, _) = config::DEFAULT_DIFFICULTY.params();
     let padding = 24.0;
-    let header_h = 150.0;
+    let header_h = 160.0;
     let initial = egui::vec2(
         w as f32 * config::CELL_SIZE + padding,
         h as f32 * config::CELL_SIZE + header_h,
@@ -18,7 +18,7 @@ fn main() -> eframe::Result {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(initial)
-            .with_min_inner_size([370.0, 425.0])
+            .with_min_inner_size(initial)
             .with_icon(
                 eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
                     .expect("Failed to load icon"),
