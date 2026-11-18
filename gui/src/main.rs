@@ -10,8 +10,8 @@ fn main() -> eframe::Result {
 
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
-    let min_size = App::get_window_size_for_difficulty(config::Difficulty::ALL[0]);
-    let default_size = App::get_window_size_for_difficulty(config::DEFAULT_DIFFICULTY);
+    let min_size = App::window_size_for_difficulty(config::Difficulty::ALL[0]);
+    let default_size = App::window_size_for_difficulty(config::DEFAULT_DIFFICULTY);
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

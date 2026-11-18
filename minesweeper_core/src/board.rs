@@ -42,7 +42,6 @@ pub enum BoardError {
     BoardTooSmall,
     MineCountValidationError { min_mines: usize, max_mines: usize },
     InvalidPosition,
-    InvalidInput,
 }
 
 #[derive(Debug, PartialEq, Eq)]

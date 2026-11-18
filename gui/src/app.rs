@@ -1,6 +1,6 @@
 use minesweeper_core::*;
 
-use crate::config::{self, BoardType, Difficulty, GameSeed, GameStatus};
+use crate::config::{self, BoardType, Difficulty, GameStatus};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -19,6 +19,7 @@ pub struct App {
     // timer
     #[serde(skip)]
     pub timer_start: Option<f64>,
+    #[serde(skip)]
     pub elapsed_seconds: u64,
 
     #[serde(skip)]
@@ -86,7 +87,7 @@ impl App {
         )?;
         self.reset();
         self.difficulty = game_seed.difficulty;
-        self.fit_window_to_board(ui);
+        self.fit_window_to_board(ui.ctx());
         self.board_type = game_seed.board_type;
         let is_won = board.is_won();
         self.board = Some(board);
@@ -196,11 +197,102 @@ impl App {
             > cell_num
     }
 
-    pub fn get_seed(&self) -> u64 {
-        self.board.as_ref().map_or(0, |b| b.seed)
-    }
+    pub fn get_game_seed(&self) -> Option<GameSeed> {
+        let Some(board) = &self.board else {
+            return None;
+        };
 
-    pub fn get_start(&self) -> usize {
-        self.board.as_ref().map_or(0, |b| b.start_idx)
+        Some(GameSeed {
+            difficulty: self.difficulty,
+            board_type: self.board_type,
+            rng_seed: board.seed,
+            start_idx: board.start_idx,
+        })
+    }
+}
+
+/// everything required to represent a game start state
+#[derive(Debug)]
+pub struct GameSeed {
+    pub difficulty: Difficulty,
+    pub board_type: BoardType,
+    pub rng_seed: u64,
+    pub start_idx: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseGameSeedError {
+    NotAscii,
+    MissingSeparator,
+    InvalidLength,
+    InvalidHex,
+    InvalidDifficulty,
+    InvalidBoardType,
+}
+
+impl std::fmt::Display for GameSeed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let d = match self.difficulty {
+            Difficulty::Beginner => 'b',
+            Difficulty::Intermediate => 'i',
+            Difficulty::Expert => 'e',
+            Difficulty::Master => 'm',
+        };
+        let b = match self.board_type {
+            BoardType::Simple => '0',
+            BoardType::Solvable => '1',
+        };
+        write!(f, "{:x}x{:x}{}{}", self.rng_seed, self.start_idx, d, b)
+    }
+}
+
+impl std::str::FromStr for GameSeed {
+    type Err = ParseGameSeedError;
+
+    fn from_str(seed_str: &str) -> Result<Self, Self::Err> {
+        let trimmed = seed_str.trim();
+
+        if !trimmed.is_ascii() {
+            return Err(ParseGameSeedError::NotAscii);
+        }
+
+        let (rng_part, config_part) = trimmed
+            .split_once('x')
+            .ok_or(ParseGameSeedError::MissingSeparator)?;
+
+        let l = config_part.len();
+        if l < 3 {
+            return Err(ParseGameSeedError::InvalidLength);
+        }
+
+        let idx_part = &config_part[..l - 2];
+        let d = &config_part[l - 2..l - 1];
+        let b = &config_part[l - 1..];
+
+        let rng_seed =
+            u64::from_str_radix(rng_part, 16).map_err(|_| ParseGameSeedError::InvalidHex)?;
+        let start_idx =
+            usize::from_str_radix(idx_part, 16).map_err(|_| ParseGameSeedError::InvalidHex)?;
+
+        let difficulty = match d {
+            "b" => Difficulty::Beginner,
+            "i" => Difficulty::Intermediate,
+            "e" => Difficulty::Expert,
+            "m" => Difficulty::Master,
+            _ => return Err(ParseGameSeedError::InvalidDifficulty),
+        };
+
+        let board_type = match b {
+            "0" => BoardType::Simple,
+            "1" => BoardType::Solvable,
+            _ => return Err(ParseGameSeedError::InvalidBoardType),
+        };
+
+        Ok(Self {
+            rng_seed,
+            start_idx,
+            difficulty,
+            board_type,
+        })
     }
 }
