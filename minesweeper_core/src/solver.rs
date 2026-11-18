@@ -288,10 +288,15 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
 
     let all_frontiers_size = frontiers.iter().map(|f| f.len()).sum::<usize>();
 
+    let mut board_idx_to_frontier_idx = vec![None::<usize>; board.size()];
+    for f in &frontiers {
+        for (fidx, &bidx) in f.iter().enumerate() {
+            board_idx_to_frontier_idx[bidx] = Some(fidx);
+        }
+    }
+    let mut seen = vec![false; board.size()];
     // accumulate all constraints in the frontier so that can test quickly
-    let get_constraints = |frontier: &[usize]| {
-        let mut seen = vec![false; board.size()];
-
+    let mut get_constraints = |frontier: &[usize]| {
         frontier
             .iter()
             .flat_map(|&fidx| board.neighbours_of(fidx, 1))
@@ -306,13 +311,8 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
 
                 let frontier_neighbour_mask = board
                     .neighbours_of(nidx, 1)
-                    .filter_map(|nnidx| {
-                        frontier
-                            .iter()
-                            .position(|&f| f == nnidx)
-                            .map(|fidx| 1u128 << fidx)
-                    })
-                    .fold(0u128, |a, b| a | b);
+                    .filter_map(|nnidx| board_idx_to_frontier_idx[nnidx])
+                    .fold(0u128, |mask, fidx| mask | (1u128 << fidx));
 
                 Some((frontier_neighbour_mask, mines_needed))
             })

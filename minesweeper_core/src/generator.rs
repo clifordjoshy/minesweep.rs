@@ -60,18 +60,11 @@ impl SolvableBoardGenerator {
         let mut nperturbs_prev = u32::MAX;
         let mut rounds = 1;
         loop {
-            let (nperturbs, is_still_guaranteed_solvable) = self.perturb(board, &mut rng);
-            log::debug!(
-                "Perturb round {}: Made {} perturbations. Affected previous deductions: {}",
-                rounds,
-                nperturbs,
-                !is_still_guaranteed_solvable
-            );
+            let nperturbs = self.perturb(board, &mut rng);
+            log::debug!("Perturb round {}: Made {} perturbations", rounds, nperturbs,);
 
-            if is_still_guaranteed_solvable || {
-                board.reset_state();
-                solver::solve_board(board, &[board.start_idx]) == SolverResult::Solved
-            } {
+            board.reset_state();
+            if solver::solve_board(board, &[board.start_idx]) == SolverResult::Solved {
                 return SolverResult::Solved;
             }
 
@@ -95,9 +88,8 @@ impl SolvableBoardGenerator {
     /// Move things around on the unsolved/solved parts of the board and try
     /// to get it to a solvable state. This could cause the resulting board to
     /// go into an unsolvable state.
-    /// Returns (num_perturbs, is_still_guaranteed_solvable)
-    fn perturb(&self, board: &mut Board, rng: &mut SmallRng) -> (u32, bool) {
-        let mut could_have_messed_up_existing = false;
+    /// Returns num_perturbs
+    fn perturb(&self, board: &mut Board, rng: &mut SmallRng) -> u32 {
         let mut nperturbs = 0u32;
 
         loop {
@@ -139,9 +131,8 @@ impl SolvableBoardGenerator {
 
                 let modified_indices = self.handle_enclosed_regions(board, rng);
                 nperturbs += 1;
-                could_have_messed_up_existing = true;
                 if solver::solve_board(board, &modified_indices) == SolverResult::Solved {
-                    return (nperturbs, false);
+                    return nperturbs;
                 }
                 continue;
             };
@@ -201,7 +192,6 @@ impl SolvableBoardGenerator {
 
                     if mine_donors.len() >= pempty.len() || mine_receivers.len() >= pmines.len() {
                         found_a_move = true;
-                        could_have_messed_up_existing = true;
                         break;
                     }
                 }
@@ -225,7 +215,6 @@ impl SolvableBoardGenerator {
 
                     if mine_donors.len() >= pempty.len() || mine_receivers.len() >= pmines.len() {
                         found_a_move = true;
-                        could_have_messed_up_existing = true;
                         break;
                     }
                 }
@@ -245,7 +234,6 @@ impl SolvableBoardGenerator {
             } else {
                 for (&s, &d) in pmines.iter().zip(mine_receivers.iter()) {
                     board.move_mine(s, d);
-                    board.open_cell(s).unwrap();
                 }
                 for &s in pmines.iter() {
                     board.open_cell(s).unwrap();
@@ -253,7 +241,7 @@ impl SolvableBoardGenerator {
                 pmines
             };
             if solver::solve_board(board, &modified_indices) == SolverResult::Solved {
-                return (nperturbs, !could_have_messed_up_existing);
+                return nperturbs;
             }
         }
     }

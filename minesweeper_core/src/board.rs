@@ -30,7 +30,7 @@ pub struct Board {
     pub mine_count: usize,
     pub seed: u64,
     pub start_idx: usize,
-    start_region: [usize; 9],
+    start_region: Box<[usize]>,
     state_grid: Box<[CellState]>,
     content_grid: Box<[CellContent]>,
     revealed_count: usize,
@@ -117,18 +117,17 @@ impl Board {
             height,
             mine_count,
             start_idx,
-            start_region: [usize::MAX; 9],
+            start_region: Box::new([]),
             seed,
             state_grid: vec![CellState::default(); total_cells].into_boxed_slice(),
             content_grid: vec![CellContent::default(); total_cells].into_boxed_slice(),
             revealed_count: 0,
             flagged_count: 0,
         };
-        let mut start_region_iter = board
+        board.start_region = board
             .neighbours_of(start_idx, 1)
-            .chain(std::iter::once(start_idx));
-        board.start_region =
-            std::array::from_fn(|_| start_region_iter.next().unwrap_or(usize::MAX));
+            .chain(std::iter::once(start_idx))
+            .collect::<Box<_>>();
 
         let mut indices_to_place = (0..total_cells)
             .filter(|&idx| !board.is_in_start_region(idx))
@@ -304,9 +303,6 @@ impl Board {
     }
 
     pub(crate) fn is_in_start_region(&self, idx: usize) -> bool {
-        // the start region arr has default value usize::MAX
-        // avoid that from equality check
-        assert_ne!(idx, usize::MAX);
         self.start_region.contains(&idx)
     }
     pub(crate) fn move_mine(&mut self, source_idx: usize, dest_idx: usize) {
@@ -345,19 +341,19 @@ impl Board {
 
         // any hidden safe cell next to a revealed empty cell would have been flood
         // opened. let's reopen those now. (this handles reopening the start region too)
-        std::iter::once(source_idx)
+        for i in std::iter::once(source_idx)
             .chain(self.neighbours_of(source_idx, 1))
             .chain(std::iter::once(dest_idx))
             .chain(self.neighbours_of(dest_idx, 1))
-            .for_each(|i| {
-                if self.content_grid[i] != CellContent::Mine
-                    && self
-                        .neighbours_of(i, 1)
-                        .any(|j| self.state_grid[j] == CellState::Revealed(CellContent::Empty))
-                {
-                    self.open_cell(i).unwrap();
-                }
-            });
+        {
+            if self.content_grid[i] != CellContent::Mine
+                && self
+                    .neighbours_of(i, 1)
+                    .any(|j| self.state_grid[j] == CellState::Revealed(CellContent::Empty))
+            {
+                self.open_cell(i).unwrap();
+            }
+        }
     }
 
     pub fn reset_state(&mut self) {
