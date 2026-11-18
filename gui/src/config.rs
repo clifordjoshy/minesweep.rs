@@ -65,7 +65,7 @@ impl BoardType {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum GameStatus {
-    Ready,
+    Waiting,
     Playing,
     Won,
     Lost,
@@ -74,7 +74,7 @@ pub enum GameStatus {
 impl GameStatus {
     pub fn label(self) -> &'static str {
         match self {
-            GameStatus::Ready => "Click any cell to start.",
+            GameStatus::Waiting => "Click any cell to start.",
             GameStatus::Playing => "Good luck!",
             GameStatus::Won => "You win!",
             GameStatus::Lost => "Boom! You hit a mine.",
@@ -166,6 +166,7 @@ impl std::str::FromStr for GameSeed {
         })
     }
 }
+
 pub struct Colors {
     // cells
     pub hidden: Color32,

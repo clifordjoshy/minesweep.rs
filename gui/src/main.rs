@@ -6,11 +6,17 @@ mod ui;
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
+    use crate::app::App;
+
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+
+    let min_size = App::get_window_size_for_difficulty(config::Difficulty::ALL[0]);
+    let default_size = App::get_window_size_for_difficulty(config::DEFAULT_DIFFICULTY);
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_min_inner_size([350., 400.])
+            .with_min_inner_size(min_size)
+            .with_inner_size(default_size)
             .with_icon(
                 eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
                     .expect("Failed to load icon"),
@@ -21,7 +27,6 @@ fn main() -> eframe::Result {
         config::APP_NAME,
         native_options,
         Box::new(|cc| {
-            egui_extras::install_image_loaders(&cc.egui_ctx);
             let app = app::App::new(cc);
             app.fit_window_to_board(&cc.egui_ctx);
             Ok(Box::new(app))

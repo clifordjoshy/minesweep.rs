@@ -1,6 +1,6 @@
 use minesweeper_core::*;
 
-use crate::config::{self, BoardType, Difficulty, GameStatus};
+use crate::config::{self, BoardType, Difficulty, GameSeed, GameStatus};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -14,11 +14,12 @@ pub struct App {
     #[serde(skip)]
     pub seed_input: String,
     #[serde(skip)]
-    pub seed_errored: bool,
+    pub seed_error: Option<String>,
 
     // timer
     #[serde(skip)]
     pub timer_start: Option<f64>,
+    pub elapsed_seconds: u64,
 
     #[serde(skip)]
     pub board: Option<Board>,
@@ -34,10 +35,11 @@ impl Default for App {
             difficulty: config::DEFAULT_DIFFICULTY,
             seed_mode: false,
             seed_input: Default::default(),
-            seed_errored: false,
+            seed_error: None,
             timer_start: None,
+            elapsed_seconds: 0,
             board: None,
-            status: GameStatus::Ready,
+            status: GameStatus::Waiting,
         }
     }
 }
@@ -47,6 +49,7 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
+        egui_extras::install_image_loaders(&cc.egui_ctx);
 
         // Load previous app state (if any).
         cc.storage
@@ -60,17 +63,19 @@ impl App {
     /// Throw away the current game and go back to the "waiting for first click" state.
     pub fn reset(&mut self) {
         self.board = None;
-        self.status = GameStatus::Ready;
+        self.status = GameStatus::Waiting;
         self.timer_start = None;
+        self.elapsed_seconds = 0;
     }
 
-    pub fn start_from_repr(&mut self, ui: &egui::Ui, seed_str: String) -> Result<(), BoardError> {
-        let game_seed = seed_str
-            .parse::<config::GameSeed>()
-            .map_err(|_| BoardError::InvalidInput)?;
+    pub fn start_from_game_seed(
+        &mut self,
+        ui: &egui::Ui,
+        game_seed: &GameSeed,
+    ) -> Result<(), BoardError> {
         let (w, h, mines) = game_seed.difficulty.params();
 
-        let board = self.board_type.generator().generate_from_seed(
+        let board = game_seed.board_type.generator().generate_from_seed(
             &BoardParams {
                 width: w,
                 height: h,

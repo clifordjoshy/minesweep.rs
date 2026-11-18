@@ -195,12 +195,19 @@ impl eframe::App for app::App {
                             .id(seed_id)
                             .hint_text("start from seed")
                             .desired_width(150.0);
-                        if self.seed_errored {
+                        if self.seed_error.is_some() {
                             textin = textin.text_color(colors.lost);
                         }
-                        let resp = ui.add(textin);
+                        let mut resp = ui.add(textin);
+
+                        if let Some(err_label) = self.seed_error.as_ref() {
+                            resp = resp.on_hover_ui(|ui| {
+                                ui.label(format!("{:?}", err_label));
+                            });
+                        }
+
                         if resp.changed() {
-                            self.seed_errored = false;
+                            self.seed_error = None;
                         }
 
                         if ui
@@ -208,12 +215,23 @@ impl eframe::App for app::App {
                             .clicked()
                             || resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
                         {
-                            if self.start_from_repr(ui, self.seed_input.clone()).is_ok() {
-                                self.seed_errored = false;
-                                self.seed_mode = false;
-                                self.seed_input.clear();
-                            } else {
-                                self.seed_errored = true;
+                            let game_seed = match self.seed_input.parse::<config::GameSeed>() {
+                                Ok(g) => g,
+                                Err(e) => {
+                                    self.seed_error = Some(format!("{:?}", e));
+                                    return;
+                                }
+                            };
+
+                            match self.start_from_game_seed(ui, &game_seed) {
+                                Ok(_) => {
+                                    self.seed_error = None;
+                                    self.seed_mode = false;
+                                    self.seed_input.clear();
+                                }
+                                Err(e) => {
+                                    self.seed_error = Some(format!("{:?}", e));
+                                }
                             }
                         }
                     }
@@ -222,7 +240,7 @@ impl eframe::App for app::App {
 
             // --- Status line ------------------------------------------------
             ui.horizontal_wrapped(|ui| {
-                if self.status != config::GameStatus::Ready {
+                if self.status != config::GameStatus::Waiting {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.label("Mines: ");
@@ -241,17 +259,18 @@ impl eframe::App for app::App {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.label("Time: ");
 
-                        if let Some(start_time) = self.timer_start {
-                            let total_secs = (ui.time() - start_time) as u64;
-                            let s = (total_secs % 60) as u32;
-                            let m = ((total_secs / 60) % 60) as u8;
-                            let h = (total_secs / 3600) as u8;
-                            ui.label(
-                                egui::RichText::new(format!("{:02}:{:02}:{:02}", h, m, s))
-                                    .monospace(),
-                            );
+                        if let Some(start_time) = self.timer_start
+                            && self.status == config::GameStatus::Playing
+                        {
+                            self.elapsed_seconds = (ui.time() - start_time) as u64;
                             ui.request_repaint_after(std::time::Duration::from_secs(1));
                         }
+                        let s = (self.elapsed_seconds % 60) as u32;
+                        let m = ((self.elapsed_seconds / 60) % 60) as u8;
+                        let h = (self.elapsed_seconds / 3600) as u8;
+                        ui.label(
+                            egui::RichText::new(format!("{:02}:{:02}:{:02}", h, m, s)).monospace(),
+                        );
                     });
 
                     ui.separator();
@@ -336,7 +355,7 @@ impl eframe::App for app::App {
                     let is_highlighted = response.hovered()
                         && matches!(
                             self.status,
-                            config::GameStatus::Ready | config::GameStatus::Playing
+                            config::GameStatus::Waiting | config::GameStatus::Playing
                         )
                         && matches!(state, CellState::Hidden | CellState::Flagged);
 
@@ -372,6 +391,14 @@ impl eframe::App for app::App {
 }
 
 impl app::App {
+    pub fn get_window_size_for_difficulty(d: config::Difficulty) -> egui::Vec2 {
+        let (w, h, _) = d.params();
+        egui::vec2(
+            (w as f32 * config::CELL_SIZE + 24.).max(525.),
+            h as f32 * config::CELL_SIZE + 160.0,
+        )
+    }
+
     pub fn fit_window_to_board(&self, ctx: &egui::Context) {
         let (maximized, fullscreen, minimized) = ctx.input(|i| {
             let vp = i.viewport();
@@ -381,11 +408,8 @@ impl app::App {
             return;
         }
 
-        let (w, h, _) = self.difficulty.params();
-        let mut needed = egui::vec2(
-            w as f32 * config::CELL_SIZE + 24.0,
-            h as f32 * config::CELL_SIZE + 160.0,
-        );
+        let mut needed = Self::get_window_size_for_difficulty(self.difficulty);
+
         let current = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size()));
         let monitor = ctx.input(|i| i.viewport().monitor_size);
 
