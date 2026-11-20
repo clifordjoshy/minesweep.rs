@@ -10,14 +10,13 @@
     />
 
     <!-- change this to your project name -->
-    <title>Minesweeper-rs</title>
+    <title>minesweep.rs</title>
 
     <!-- config for our rust wasm binary. go to https://trunk-rs.github.io/trunk/guide/assets/#rust for more customization -->
     <link data-trunk rel="rust" data-wasm-opt="2" />
     <!-- this is the base url relative to which other urls will be constructed. trunk will insert this from the public-url option -->
     <base data-trunk-public-url />
 
-    <link data-trunk rel="copy-file" href="assets/sw.js" />
     <link rel="manifest" href="manifest.json" />
     <meta
       name="theme-color"
@@ -125,21 +124,10 @@
 
     <!-- the loading spinner will be removed in main.rs -->
     <div class="centered" id="loading_text">
-      <noscript>You need javascript to use this website</noscript>
+      <noscript>You need javascript to view this :&lpar;</noscript>
       <p style="font-size: 16px">Loading…</p>
       <div class="lds-dual-ring"></div>
     </div>
-
-    <!--Register Service Worker. this will cache the wasm / js scripts for offline use (for PWA functionality). -->
-    <!-- Force refresh (Ctrl + F5) to load the latest files instead of cached files  -->
-    <script>
-      // We disable caching during development so that we always view the latest version.
-      if ("serviceWorker" in navigator && window.location.hash !== "#dev") {
-        window.addEventListener("load", function () {
-          navigator.serviceWorker.register("sw.js");
-        });
-      }
-    </script>
   </body>
 </html>
 

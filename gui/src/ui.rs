@@ -1,6 +1,7 @@
 use crate::app;
 use crate::config;
-use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Shape, Stroke, Vec2, vec2};
+use egui::emath::GuiRounding;
+use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Shape, Stroke, vec2};
 use minesweeper_core::{CellContent, CellState};
 
 enum Glyph {
@@ -317,59 +318,72 @@ impl eframe::App for app::App {
                 ui.spacing_mut().item_spacing.y = 0.;
                 ui.spacing_mut().item_spacing.x = 0.;
                 ui.add_space(pad_y);
-                let (board_rect, _) = ui.allocate_exact_size(board_size, Sense::hover());
+                ui.horizontal(|ui| {
+                    ui.add_space(pad_x);
+                    let (board_rect, _) = ui.allocate_exact_size(board_size, Sense::hover());
+                    let origin = board_rect.min;
 
-                for idx in 0..w * h {
-                    let (x, y) = (idx % w, idx / w);
+                    let ppp = ui.pixels_per_point();
+                    let gap = 1.2 / ppp;
 
-                    let top_left = board_rect.min
-                        + vec2(
-                            pad_x + x as f32 * config::CELL_SIZE,
-                            y as f32 * config::CELL_SIZE,
+                    for idx in 0..w * h {
+                        let (x, y) = (idx % w, idx / w);
+
+                        // Snap the outer grid boundaries of each cell to exact physical pixels
+                        let min_x = (origin.x + x as f32 * config::CELL_SIZE).round_to_pixels(ppp);
+                        let max_x =
+                            (origin.x + (x + 1) as f32 * config::CELL_SIZE).round_to_pixels(ppp);
+                        let min_y = (origin.y + y as f32 * config::CELL_SIZE).round_to_pixels(ppp);
+                        let max_y =
+                            (origin.y + (y + 1) as f32 * config::CELL_SIZE).round_to_pixels(ppp);
+
+                        let cell_rect = Rect::from_min_max(
+                            egui::pos2(min_x + gap * 0.5, min_y + gap * 0.5),
+                            egui::pos2(max_x - gap * 0.5, max_y - gap * 0.5),
                         );
 
-                    // shrink() leaves a thin gap between cells, which acts as the grid lines.
-                    let cell_rect =
-                        Rect::from_min_size(top_left, Vec2::splat(config::CELL_SIZE)).shrink(0.6);
+                        // Each cell gets its own interaction response (needs a unique id).
+                        let response = ui.interact(
+                            cell_rect,
+                            ui.scope_id().with(("cell", idx)),
+                            Sense::click(),
+                        );
 
-                    // Each cell gets its own interaction response (needs a unique id).
-                    let response =
-                        ui.interact(cell_rect, ui.scope_id().with(("cell", idx)), Sense::click());
+                        // Before the first click there is no board, so everything is hidden.
+                        let state = match &self.board {
+                            Some(board) => board.state(idx).unwrap(),
+                            None => CellState::Hidden,
+                        };
 
-                    // Before the first click there is no board, so everything is hidden.
-                    let state = match &self.board {
-                        Some(board) => board.state(idx).unwrap(),
-                        None => CellState::Hidden,
-                    };
+                        let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
 
-                    let is_incorrectly_marked = self.is_cell_incorrectly_marked(idx);
+                        let is_highlighted = response.hovered()
+                            && matches!(
+                                self.status,
+                                config::GameStatus::Waiting | config::GameStatus::Playing
+                            )
+                            && matches!(state, CellState::Hidden | CellState::Flagged);
 
-                    let is_highlighted = response.hovered()
-                        && matches!(
-                            self.status,
-                            config::GameStatus::Waiting | config::GameStatus::Playing
-                        )
-                        && matches!(state, CellState::Hidden | CellState::Flagged);
+                        paint_cell(
+                            ui,
+                            cell_rect,
+                            colors,
+                            state,
+                            is_incorrectly_marked,
+                            is_highlighted,
+                        );
 
-                    paint_cell(
-                        ui,
-                        cell_rect,
-                        colors,
-                        state,
-                        is_incorrectly_marked,
-                        is_highlighted,
-                    );
+                        if is_highlighted {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
 
-                    if is_highlighted {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        if response.clicked() {
+                            self.on_cell_click(ui, idx);
+                        } else if response.secondary_clicked() {
+                            self.on_cell_flagged(idx);
+                        }
                     }
-
-                    if response.clicked() {
-                        self.on_cell_click(ui, idx);
-                    } else if response.secondary_clicked() {
-                        self.on_cell_flagged(idx);
-                    }
-                }
+                });
             });
 
             egui::warn_if_debug_build(ui);

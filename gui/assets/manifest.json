@@ -1,6 +1,6 @@
 {
-  "name": "egui Template PWA",
-  "short_name": "egui-template-pwa",
+  "name": "minesweep.rs",
+  "short_name": "minesweep.rs",
   "lang": "en-US",
   "id": "/index.html",
   "start_url": "./index.html",
