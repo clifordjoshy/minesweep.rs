@@ -37,11 +37,6 @@ impl BoardGenerator for SolvableBoardGenerator {
                 || self.perturb_and_solve_board(&mut board) == SolverResult::Solved
             {
                 board.reset_state();
-                // assert_eq!(
-                //     solver::solve_board(&mut board, vec![params.start_idx]),
-                //     SolverResult::Solved
-                // );
-                // board.reset_state();
                 return Ok(board);
             }
 
