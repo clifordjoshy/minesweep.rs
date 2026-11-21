@@ -281,180 +281,204 @@ fn handle_neighbour_constraining_case(
 ///   don't directly overlap in their neighbourhood.
 /// - Also takes the total mine count into account for end-game deductions.
 fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
-    let (frontiers, non_frontier) = utils::find_disjoint_frontiers(board);
+    let (mut frontiers, interior) = utils::find_disjoint_frontiers(board);
 
-    let total_mines_remaining = board.mines_remaining().max(0) as usize;
-    let max_mines_per_frontier = total_mines_remaining + 1 - frontiers.len();
+    let any_frontiers_ignored = {
+        // This limit is just coming from the bitmask being u128, but 127 seems like
+        // a good enough depth.
+        let len_before = frontiers.len();
+        frontiers.retain(|f| f.len() <= 128);
+        frontiers.len() < len_before
+    };
 
-    let all_frontiers_size = frontiers.iter().map(|f| f.len()).sum::<usize>();
+    let board_mines_remaining = board.mines_remaining().max(0) as usize;
 
-    let mut board_idx_to_frontier_idx = vec![None::<usize>; board.size()];
-    for f in &frontiers {
-        for (fidx, &bidx) in f.iter().enumerate() {
-            board_idx_to_frontier_idx[bidx] = Some(fidx);
+    let constraints = {
+        let mut board_idx_to_frontier_idx = vec![None::<usize>; board.size()];
+        for f in &frontiers {
+            for (fidx, &bidx) in f.iter().enumerate() {
+                board_idx_to_frontier_idx[bidx] = Some(fidx);
+            }
         }
-    }
-    let mut seen = vec![false; board.size()];
-    // accumulate all constraints in the frontier so that can test quickly
-    let mut get_constraints = |frontier: &[usize]| {
-        frontier
+        let mut seen = vec![false; board.size()];
+        frontiers
             .iter()
-            .flat_map(|&fidx| board.neighbours_of(fidx, 1))
-            .filter(|&i| !std::mem::replace(&mut seen[i], true))
-            .filter_map(|nidx| {
-                let CellState::Revealed(CellContent::Number(cell_num)) = board[nidx] else {
-                    return None;
-                };
+            .map(|ftr| {
+                ftr.iter()
+                    .flat_map(|&i| board.neighbours_of(i, 1))
+                    .filter(|&i| !std::mem::replace(&mut seen[i], true))
+                    .filter_map(|nidx| {
+                        let CellState::Revealed(CellContent::Number(cell_num)) = board[nidx] else {
+                            return None;
+                        };
 
-                let flagged_count = utils::NeighbourInfo::for_cell(board, nidx).flagged_count();
-                let mines_needed = cell_num - flagged_count;
+                        let flagged_count =
+                            utils::NeighbourInfo::for_cell(board, nidx).flagged_count();
+                        let mines_needed = cell_num - flagged_count;
 
-                let frontier_neighbour_mask = board
-                    .neighbours_of(nidx, 1)
-                    .filter_map(|nnidx| board_idx_to_frontier_idx[nnidx])
-                    .fold(0u128, |mask, fidx| mask | (1u128 << fidx));
+                        let frontier_neighbour_mask = board
+                            .neighbours_of(nidx, 1)
+                            .filter_map(|nnidx| board_idx_to_frontier_idx[nnidx])
+                            .fold(0u128, |mask, fidx| mask | (1u128 << fidx));
 
-                Some((frontier_neighbour_mask, mines_needed))
+                        Some((frontier_neighbour_mask, mines_needed))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>()
     };
 
+    // min and max mines per frontier
+    let bounds_per_frontier = {
+        constraints
+            .iter()
+            .map(|cs| {
+                let mut mask_union = 0u128;
+                let mut min_mines = 0usize;
+                let mut max_mines = 0usize;
+                for &(cmask, cmines) in cs.iter() {
+                    // min is when all possible mines are in overlap
+                    min_mines +=
+                        cmines.saturating_sub((cmask & mask_union).count_ones() as u8) as usize;
+
+                    // max is when all possible mines are in complement
+                    max_mines += cmines.min((cmask & !mask_union).count_ones() as u8) as usize;
+
+                    mask_union |= cmask;
+                }
+
+                max_mines = max_mines.min(board_mines_remaining);
+
+                (min_mines, max_mines)
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let (mut min_mines_total, mut max_mines_total) = bounds_per_frontier
+        .iter()
+        .fold((0, 0), |(a, b), &(x, y)| ((a + x), (b + y)));
+
+    // if the total number of mines we need is within the entire frontier's bounds
+    // then it might be possible that a tighter bound (obtained by checking every
+    // solution) might allow us to deduce information about the interior
+    let attempt_deduction_on_totals = !any_frontiers_ignored
+        && (board_mines_remaining == min_mines_total
+            || (board_mines_remaining >= min_mines_total + interior.len()
+                && board_mines_remaining <= max_mines_total + interior.len()));
+
+    // if the above field is false, we can prune a bunch of checks
+    // 1. all we plan to find is the list of cells that's a mine/nonmine always
+    // 2. as soon as we get one valid configuration, we can skip checking any
+    //    branch that does not refute the existing configurations
+    // if the above is true, then we would need to check every possible configuration
+    // so that we can tighten the bounds
+
     let mut definitely_mines = Vec::<usize>::new();
     let mut definitely_not_mines = Vec::<usize>::new();
 
-    let mut min_mines_guaranteed_in_entire_frontier = 0;
-    let mut max_mines_possible_in_entire_frontier = 0;
-
-    for frontier in frontiers {
-        if frontier.len() > 127 {
-            // we might be able to go higher. this limit is just coming from
-            // the bitmask being u128, but 127 seems like a good enough depth
-
-            max_mines_possible_in_entire_frontier += frontier.len();
-
-            continue;
-        }
-
-        let constraints = get_constraints(&frontier);
-
-        let min_required_mines_in_frontier = total_mines_remaining
-            .saturating_sub(non_frontier.len())
-            .saturating_sub(all_frontiers_size - frontier.len());
-
-        let mut min_guaranteed_mines_in_frontier = frontier.len();
-        let mut max_possible_mines_in_frontier = 0;
+    for ((frontier, constraints), &(min_mines_estimate, max_mines_estimate)) in frontiers
+        .iter()
+        .zip(constraints.iter())
+        .zip(bounds_per_frontier.iter())
+    {
+        let mut min_mines_actual = max_mines_estimate;
+        let mut max_mines_actual = min_mines_estimate;
 
         let full_mask = (1u128 << frontier.len()) - 1;
 
-        let mut found_something = false;
-        let mut definitely_mines_bitmask = full_mask;
-        let mut definitely_not_mines_bitmask = full_mask;
+        let mut definitely_mines_mask = full_mask;
+        let mut definitely_not_mines_mask = full_mask;
 
         // essentially a depth first search on all possible combinations of
         // this frontier (using a bitmask to represent entries in the frontier
         // that's being treated as a mine)
-
-        // we start by adding all children of the 0 (no mines in frontier) case
-        // we know that there must be atleast one mine in this frontier since
-        // we're in this function).
-
         // the tree looks something like below (if no pruning)
         //         000
         //   001   010      100
         //         011   101   110
         //                     111
         //
+        // we start by adding all children from depth 1 into the stack
         // at the end of the traversal, if one cell is a mine across all possible
         // solutions, then we flag it. if not a mine across all possible solutions
         // we open it.
-        // we also track the min and max possible mines across the frontier so that
-        // we can make deductions about the non frontier region.
 
-        let mut mine_bitmask_stack = (0..frontier.len()).map(|i| 1u128 << i).collect::<Vec<_>>();
+        let mut mine_mask_stack = (0..frontier.len()).map(|i| 1u128 << i).collect::<Vec<_>>();
 
-        'next_bitmask: while let Some(mine_bitmask) = mine_bitmask_stack.pop() {
-            if mine_bitmask.count_ones() as usize > max_mines_per_frontier {
-                continue;
-            }
-
+        'next_bitmask: while let Some(mine_mask) = mine_mask_stack.pop() {
             // the highest set bit tells us up to how many indexes from frontier
-            // must already be confirmed. if that configuration isn't valid
-            // then no point branching from there.
-            let bits_already_set = mine_bitmask.ilog2();
-            let must_be_fine_mask = (1u128 << (bits_already_set + 1)) - 1;
-            let unchecked_mask = full_mask & !must_be_fine_mask;
+            // must already be decided.
+            let bits_already_set = mine_mask.ilog2();
+            let decided_mask = (1u128 << (bits_already_set + 1)) - 1;
+            let undecided_mask = full_mask & !decided_mask;
 
-            let mut all_constraints_satisfied = true;
-
-            for &(frontier_neighbour_mask, mines_needed) in constraints.iter() {
-                let flagged_in_constraint_region =
-                    (mine_bitmask & frontier_neighbour_mask).count_ones() as u8;
-                let unknown_in_constraint_region =
-                    (frontier_neighbour_mask & unchecked_mask).count_ones() as u8;
-
-                if flagged_in_constraint_region + unknown_in_constraint_region < mines_needed
-                    || flagged_in_constraint_region > mines_needed
-                {
-                    // this configuration doesn't have enough / has too many mines
-                    // in the `must_be_fine_mask` region.
-                    // no point proceeding further with the children of this configuration
-                    continue 'next_bitmask;
-                }
-
-                all_constraints_satisfied =
-                    all_constraints_satisfied && flagged_in_constraint_region == mines_needed
-            }
-
-            if all_constraints_satisfied {
-                if (mine_bitmask & full_mask).count_ones() as usize
-                    >= min_required_mines_in_frontier
-                {
-                    // add this to the list of known solutions
-                    found_something = true;
-                    definitely_mines_bitmask &= mine_bitmask;
-                    definitely_not_mines_bitmask &= full_mask & !mine_bitmask;
-
-                    min_guaranteed_mines_in_frontier = std::cmp::min(
-                        min_guaranteed_mines_in_frontier,
-                        mine_bitmask.count_ones() as usize,
-                    );
-                    max_possible_mines_in_frontier = std::cmp::max(
-                        max_possible_mines_in_frontier,
-                        mine_bitmask.count_ones() as usize,
-                    )
-                }
-
+            if !attempt_deduction_on_totals
+                // if this mask does not refute the accumulated masks and
+                // the children of this mask will not refute the acc masks
+                && (definitely_not_mines_mask & (mine_mask | undecided_mask) == 0
+                    && definitely_mines_mask & !mine_mask == 0)
+            {
                 continue 'next_bitmask;
             }
 
-            mine_bitmask_stack.extend(
-                ((bits_already_set as usize + 1)..frontier.len())
-                    .map(|i| mine_bitmask | (1u128 << i)),
-            );
-        }
+            let mut all_constraints_satisfied = true;
 
-        if found_something {
-            for (frontier_idx, &board_idx) in frontier.iter().enumerate() {
-                let idx_mask = 1u128 << frontier_idx;
-                if definitely_mines_bitmask & idx_mask != 0 {
-                    definitely_mines.push(board_idx);
+            for &(cmask, nmines) in constraints.iter() {
+                let flagged = (mine_mask & cmask).count_ones() as u8;
+                let unknown = (cmask & undecided_mask).count_ones() as u8;
+
+                if flagged + unknown < nmines || flagged > nmines {
+                    // this configuration doesn't have enough / has too many mines
+                    // in the `decided_mask` region. pruned
+                    continue 'next_bitmask;
                 }
-                if definitely_not_mines_bitmask & idx_mask != 0 {
-                    definitely_not_mines.push(board_idx);
-                }
+
+                all_constraints_satisfied = all_constraints_satisfied && flagged == nmines
             }
 
-            min_mines_guaranteed_in_entire_frontier += min_guaranteed_mines_in_frontier;
-            max_mines_possible_in_entire_frontier += max_possible_mines_in_frontier;
-        } else {
-            max_mines_possible_in_entire_frontier += frontier.len();
+            if all_constraints_satisfied {
+                // add this to the list of known solutions
+                definitely_mines_mask &= mine_mask;
+                definitely_not_mines_mask &= !mine_mask;
+
+                if attempt_deduction_on_totals {
+                    min_mines_actual = min_mines_actual.min(mine_mask.count_ones() as usize);
+                    max_mines_actual = max_mines_actual.max(mine_mask.count_ones() as usize)
+                }
+            } else if (mine_mask.count_ones() as usize) < max_mines_estimate {
+                mine_mask_stack.extend(
+                    ((bits_already_set as usize + 1)..frontier.len())
+                        .map(|i| mine_mask | 1u128 << i),
+                );
+            }
+        }
+
+        assert_ne!(definitely_mines_mask, full_mask);
+        assert_ne!(definitely_not_mines_mask, full_mask);
+
+        for (frontier_idx, &board_idx) in frontier.iter().enumerate() {
+            let idx_mask = 1u128 << frontier_idx;
+            if definitely_mines_mask & idx_mask != 0 {
+                definitely_mines.push(board_idx);
+            }
+            if definitely_not_mines_mask & idx_mask != 0 {
+                definitely_not_mines.push(board_idx);
+            }
+        }
+
+        if attempt_deduction_on_totals {
+            // tighten the bounds with actual limits seen
+            min_mines_total += min_mines_actual - min_mines_estimate;
+            max_mines_total -= max_mines_estimate - max_mines_actual;
         }
     }
 
-    if total_mines_remaining == min_mines_guaranteed_in_entire_frontier {
-        definitely_not_mines.extend(non_frontier);
-    } else if total_mines_remaining == max_mines_possible_in_entire_frontier + non_frontier.len() {
-        definitely_mines.extend(non_frontier);
+    if attempt_deduction_on_totals {
+        if board_mines_remaining == min_mines_total {
+            definitely_not_mines.extend(interior);
+        } else if board_mines_remaining == max_mines_total + interior.len() {
+            definitely_mines.extend(interior);
+        }
     }
 
     let mut modified_indices = Vec::new();
