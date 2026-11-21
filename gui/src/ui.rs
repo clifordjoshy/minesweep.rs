@@ -173,18 +173,33 @@ impl eframe::App for app::App {
                     }
                     ui.add_space(2.0);
                     let seed_id = egui::Id::unique("seed_input");
-                    if ui
-                        .add(
-                            egui::Button::new(if self.seed_mode { "◂" } else { "▸" })
-                                .corner_radius(egui::CornerRadius {
-                                    nw: 0,
-                                    ne: 4,
-                                    sw: 0,
-                                    se: 4,
-                                }),
-                        )
-                        .clicked()
-                    {
+
+                    let arrow_btn =
+                        ui.add(egui::Button::new(" ").corner_radius(egui::CornerRadius {
+                            nw: 0,
+                            ne: 4,
+                            sw: 0,
+                            se: 4,
+                        }));
+
+                    ui.painter().add(egui::Shape::convex_polygon(
+                        {
+                            let c = arrow_btn.rect.center();
+                            let w = arrow_btn.rect.width() * 0.4;
+                            let h = arrow_btn.rect.height() * 0.4;
+                            let inv = if self.seed_mode { -1 } else { 1 } as f32;
+
+                            vec![
+                                egui::pos2(c.x + w * 0.5 * inv, c.y),
+                                egui::pos2(c.x - w * 0.5 * inv, c.y - h * 0.5),
+                                egui::pos2(c.x - w * 0.5 * inv, c.y + h * 0.5),
+                            ]
+                        },
+                        ui.style().interact(&arrow_btn).text_color(),
+                        egui::Stroke::NONE,
+                    ));
+
+                    if arrow_btn.clicked() {
                         self.seed_mode = !self.seed_mode;
                         if self.seed_mode {
                             ui.memory_mut(|m| m.request_focus(seed_id));

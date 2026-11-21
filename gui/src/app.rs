@@ -56,7 +56,8 @@ impl App {
         cc.storage
             .and_then(|storage| eframe::get_value(storage, eframe::APP_KEY))
             .unwrap_or_else(|| {
-                cc.egui_ctx.set_theme(config::DEFAULT_THEME);
+                cc.egui_ctx
+                    .set_theme(cc.egui_ctx.system_theme().unwrap_or(config::DEFAULT_THEME));
                 Default::default()
             })
     }
