@@ -4,8 +4,9 @@ A Minesweeper game where every board can be solved by pure logic, with no guessi
 
 **[Play in your browser](https://cliford.net/demos/minesweeper)** (WebAssembly build)
 
-![Screenshot of the game](images/screenshot.png)
-
+<p align="center">
+  <img src="./images/screenshot.png" alt="screenshot" height="350">
+</p>
 ## How to play
 
 - **Left click** to reveal a cell
@@ -30,3 +31,8 @@ trunk serve --release
 ```
 
 Then open `http://127.0.0.1:8080`.
+
+## Links
+
+- https://cliford.net/posts/minesweeper
+- https://cliford.net/projects/minesweeper
