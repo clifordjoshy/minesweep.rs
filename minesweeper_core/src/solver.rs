@@ -405,8 +405,9 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
         // solutions, then we flag it. if not a mine across all possible solutions
         // we open it.
 
-        let max_mines_allowed =
-            board_mines_remaining.saturating_sub(min_mines_total - min_mines_estimate);
+        let max_mines_allowed = board_mines_remaining
+            .saturating_sub(min_mines_total - min_mines_estimate)
+            .min(max_mines_estimate);
         let min_mines_required = if !any_frontiers_ignored {
             board_mines_remaining
                 .saturating_sub(interior.len() + max_mines_total - max_mines_estimate)
