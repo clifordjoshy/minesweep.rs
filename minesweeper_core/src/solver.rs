@@ -363,9 +363,9 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
     // solution) might allow us to deduce information about the interior
     let attempt_deduction_on_totals = !any_frontiers_ignored
         && !interior.is_empty()
-        && (board_mines_remaining >= min_mines_total && board_mines_remaining <= max_mines_total)
-        || (board_mines_remaining >= min_mines_total + interior.len()
-            && board_mines_remaining <= max_mines_total + interior.len());
+        && ((min_mines_total..=max_mines_total).contains(&board_mines_remaining)
+            || (min_mines_total + interior.len()..=max_mines_total + interior.len())
+                .contains(&board_mines_remaining));
 
     // if the above field is false, we can prune a bunch of checks
     // 1. all we plan to find is the list of cells that's a mine/nonmine always
@@ -405,6 +405,15 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
         // solutions, then we flag it. if not a mine across all possible solutions
         // we open it.
 
+        let max_mines_allowed =
+            board_mines_remaining.saturating_sub(min_mines_total - min_mines_estimate);
+        let min_mines_required = if !any_frontiers_ignored {
+            board_mines_remaining
+                .saturating_sub(interior.len() + max_mines_total - max_mines_estimate)
+        } else {
+            0
+        };
+
         let mut mine_mask_stack = (0..frontier.len()).map(|i| 1u128 << i).collect::<Vec<_>>();
 
         'next_bitmask: while let Some(mine_mask) = mine_mask_stack.pop() {
@@ -439,12 +448,9 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
             }
 
             if all_constraints_satisfied {
-                let lb = board_mines_remaining
-                    .saturating_sub(interior.len() + max_mines_total - max_mines_estimate)
-                    as u32;
-                let ub = board_mines_remaining.saturating_sub(min_mines_total - min_mines_estimate)
-                    as u32;
-                if !(mine_mask.count_ones() >= lb && mine_mask.count_ones() <= ub) {
+                if !(min_mines_required..=max_mines_allowed)
+                    .contains(&(mine_mask.count_ones() as usize))
+                {
                     // while this is a valid solution, it does not fit in with
                     // the mine counts that we have
                     continue 'next_bitmask;
@@ -459,7 +465,7 @@ fn handle_frontier_backtracking_case(board: &mut Board) -> Option<Vec<usize>> {
                     min_mines_actual = min_mines_actual.min(mine_mask.count_ones() as usize);
                     max_mines_actual = max_mines_actual.max(mine_mask.count_ones() as usize)
                 }
-            } else if (mine_mask.count_ones() as usize) < max_mines_estimate {
+            } else if (mine_mask.count_ones() as usize) < max_mines_allowed {
                 mine_mask_stack.extend(
                     ((bits_already_set as usize + 1)..frontier.len())
                         .map(|i| mine_mask | 1u128 << i),
