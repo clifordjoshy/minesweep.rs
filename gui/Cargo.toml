@@ -12,7 +12,14 @@ targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 minesweeper_core = { path = "../minesweeper_core" }
 egui = "0.37.0"
 egui_extras = { version = "0.37", features = ["svg"] }
-eframe = { version = "0.37.0", features = ["persistence"] }
+eframe = { version = "0.37.0", default-features = false, features = [
+  "persistence",
+  "default_fonts",
+  "system_fonts",
+  "wayland",
+  "x11",
+  "glow",
+] }
 log = "0.4.27"
 serde = { version = "1.0.219", features = ["derive"] }
 

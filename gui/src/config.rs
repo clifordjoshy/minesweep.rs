@@ -55,6 +55,13 @@ impl BoardType {
         format!("{:?}", self)
     }
 
+    pub fn description(self) -> &'static str {
+        match self {
+            BoardType::Simple => "Classic Minesweeper. May require guessing.",
+            BoardType::Solvable => "Guaranteed solvable through logical deduction alone.",
+        }
+    }
+
     pub fn generator(self) -> &'static dyn generator::BoardGenerator {
         match self {
             BoardType::Simple => &generator::SimpleBoardGenerator,
@@ -106,7 +113,7 @@ pub const LIGHT_MODE: Colors = Colors {
     revealed: Color32::from_gray(226),
     incorrect: Color32::from_rgb(255, 200, 200),
     mine_bg: Color32::from_rgb(215, 80, 80),
-    mine_glyph: Color32::BLACK,
+    mine_glyph: Color32::from_gray(20),
     numbers: [
         Color32::from_rgb(0, 0, 255),   // 1
         Color32::from_rgb(0, 110, 0),   // 2
@@ -128,8 +135,8 @@ pub const DARK_MODE: Colors = Colors {
     hidden_hover: Color32::from_gray(110),
     revealed: Color32::from_gray(48),
     incorrect: Color32::from_rgb(90, 30, 30),
-    mine_bg: Color32::from_rgb(170, 50, 50),
-    mine_glyph: Color32::WHITE,
+    mine_bg: Color32::from_rgb(200, 60, 60),
+    mine_glyph: Color32::from_gray(15),
     numbers: [
         Color32::from_rgb(110, 160, 255), // 1
         Color32::from_rgb(80, 200, 100),  // 2
@@ -163,5 +170,3 @@ impl Colors {
 }
 
 pub const DIGITS_TEXT: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-
-pub const MINE_TEXT: &str = "*";

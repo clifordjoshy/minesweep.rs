@@ -1,13 +1,15 @@
 use crate::app;
 use crate::config;
 use egui::emath::GuiRounding;
-use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Shape, Stroke, vec2};
+use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Shape, Stroke, Vec2, vec2};
 use minesweeper_core::{CellContent, CellState};
 
 enum Glyph {
     Text(&'static str, Color32),
     Flag,
+    Mine,
 }
+
 fn paint_flag(painter: &Painter, rect: Rect, colors: &config::Colors) {
     let p = |fx: f32, fy: f32| rect.min + vec2(fx * rect.width(), fy * rect.height());
     let pole_w = rect.width() * 0.07;
@@ -26,6 +28,23 @@ fn paint_flag(painter: &Painter, rect: Rect, colors: &config::Colors) {
         colors.flag_cloth,
         Stroke::NONE,
     ));
+}
+
+fn paint_mine(painter: &Painter, rect: Rect, colors: &config::Colors) {
+    let c = rect.center();
+    let w = rect.width();
+    let color = colors.mine_glyph;
+
+    let body_r = w * 0.20;
+    let spike_len = w * 0.26;
+    let stroke = Stroke::new(w * 0.07, color);
+
+    for i in 0..4 {
+        let d = Vec2::angled(i as f32 * std::f32::consts::FRAC_PI_4) * spike_len;
+        painter.line_segment([c - d, c + d], stroke);
+    }
+
+    painter.circle_filled(c, body_r, color);
 }
 
 fn paint_cell(
@@ -64,10 +83,7 @@ fn paint_cell(
                     )),
                 )
             }
-            CellContent::Mine => (
-                colors.mine_bg,
-                Some(Glyph::Text(config::MINE_TEXT, colors.mine_glyph)),
-            ),
+            CellContent::Mine => (colors.mine_bg, Some(Glyph::Mine)),
         },
     };
 
@@ -84,6 +100,7 @@ fn paint_cell(
             );
         }
         Some(Glyph::Flag) => paint_flag(painter, rect, colors),
+        Some(Glyph::Mine) => paint_mine(painter, rect, colors),
         None => {}
     }
 }
@@ -144,6 +161,7 @@ impl eframe::App for app::App {
                 for b in config::BoardType::ALL {
                     if ui
                         .selectable_value(&mut self.board_type, b, b.label())
+                        .on_hover_text(b.description())
                         .changed()
                     {
                         changed = true;
@@ -295,8 +313,7 @@ impl eframe::App for app::App {
                         ui.label("Seed: ");
                         ui.label(
                             egui::RichText::new(self.get_game_seed().unwrap().to_string())
-                                .monospace()
-                                .small(),
+                                .monospace(),
                         );
                     });
                     ui.separator();
@@ -415,7 +432,7 @@ impl app::App {
     pub fn window_size_for_difficulty(d: config::Difficulty) -> egui::Vec2 {
         let (w, h, _) = d.params();
         egui::vec2(
-            (w as f32 * config::CELL_SIZE + 24.).max(525.),
+            (w as f32 * config::CELL_SIZE + 24.).max(590.),
             h as f32 * config::CELL_SIZE + 160.0,
         )
     }

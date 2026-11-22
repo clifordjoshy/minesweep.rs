@@ -35,6 +35,7 @@ pub struct Board {
     content_grid: Box<[CellContent]>,
     revealed_count: usize,
     flagged_count: usize,
+    is_lost: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -42,6 +43,7 @@ pub enum BoardError {
     BoardTooSmall,
     MineCountValidationError { min_mines: usize, max_mines: usize },
     InvalidPosition,
+    AlreadyLost,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -123,6 +125,7 @@ impl Board {
             content_grid: vec![CellContent::default(); total_cells].into_boxed_slice(),
             revealed_count: 0,
             flagged_count: 0,
+            is_lost: false,
         };
         board.start_region = board
             .neighbours_of(start_idx, 1)
@@ -156,12 +159,18 @@ impl Board {
         if self.state(open_idx)? != CellState::Hidden {
             return Ok(BoardCellOpenResult::Noop);
         }
+        if self.is_lost {
+            return Err(BoardError::AlreadyLost);
+        }
 
         let content = self.content_grid[open_idx];
         self.state_grid[open_idx] = CellState::Revealed(content);
 
         let mut result = match content {
-            CellContent::Mine => BoardCellOpenResult::MineExploded,
+            CellContent::Mine => {
+                self.mark_board_lost();
+                BoardCellOpenResult::MineExploded
+            }
             CellContent::Number(_) => {
                 self.revealed_count += 1;
                 BoardCellOpenResult::Revealed(vec![open_idx])
@@ -211,6 +220,9 @@ impl Board {
         let CellState::Revealed(CellContent::Number(nearby_mines)) = self.state(open_idx)? else {
             return Ok(BoardCellOpenResult::Noop);
         };
+        if self.is_lost {
+            return Err(BoardError::AlreadyLost);
+        }
 
         // open all neighbours that can be opened given current markings (chording)
         let marked_mines = self
@@ -251,6 +263,9 @@ impl Board {
         if matches!(self.state(flag_idx)?, CellState::Revealed(_)) {
             return Err(BoardError::InvalidPosition);
         }
+        if self.is_lost {
+            return Err(BoardError::AlreadyLost);
+        }
 
         if self.state_grid[flag_idx] == CellState::Hidden {
             self.state_grid[flag_idx] = CellState::Flagged;
@@ -263,6 +278,9 @@ impl Board {
     pub fn unflag_cell(&mut self, flag_idx: usize) -> Result<(), BoardError> {
         if matches!(self.state(flag_idx)?, CellState::Revealed(_)) {
             return Err(BoardError::InvalidPosition);
+        }
+        if self.is_lost {
+            return Err(BoardError::AlreadyLost);
         }
 
         if self.state_grid[flag_idx] == CellState::Flagged {
@@ -305,6 +323,7 @@ impl Board {
     pub(crate) fn is_in_start_region(&self, idx: usize) -> bool {
         self.start_region.contains(&idx)
     }
+
     pub(crate) fn move_mine(&mut self, source_idx: usize, dest_idx: usize) {
         assert!(self.content_grid[source_idx] == CellContent::Mine);
         assert!(self.content_grid[dest_idx] != CellContent::Mine);
@@ -360,7 +379,19 @@ impl Board {
         self.state_grid.fill(CellState::Hidden);
         self.flagged_count = 0;
         self.revealed_count = 0;
+        self.is_lost = false;
         self.open_cell(self.start_idx).unwrap();
+    }
+
+    fn mark_board_lost(&mut self) {
+        self.is_lost = true;
+
+        for i in 0..self.size() {
+            if self.content_grid[i] == CellContent::Mine && self.state_grid[i] == CellState::Hidden
+            {
+                self.state_grid[i] = CellState::Revealed(CellContent::Mine)
+            }
+        }
     }
 }
 
