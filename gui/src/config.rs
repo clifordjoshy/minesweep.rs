@@ -38,7 +38,7 @@ impl Difficulty {
 
     pub fn label(self) -> String {
         let (w, h, m) = self.params();
-        format!("{:?} ({}x{}, {})", self, w, h, m)
+        format!("{:?} ({}×{}, {})", self, w, h, m)
     }
 }
 
