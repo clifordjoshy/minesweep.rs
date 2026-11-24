@@ -15,26 +15,51 @@ A Minesweeper game where every board can be solved by pure logic, with no guessi
 - Numbers show how many mines are in the neighbouring cells
 - Reveal every safe cell to win
 
-## Building
+## Download & Installation
 
-### Native
+### Pre-built Binaries
+
+Standalone executables for **Windows** and **Linux** (`x86_64`) are available on the [Releases](../../releases) page.
+
+### Build from Source
+
+#### Quick Run
 
 ```sh
 cargo run --release
 ```
 
+#### Linux Desktop Integration
+
+To build and install the binary (`minesweep_rs`), desktop entry, and icon system-wide (defaults to `/usr/local`):
+
+```sh
+make build
+sudo make install
+```
+
+To install for the current user only (without `sudo`):
+
+```sh
+make install PREFIX=~/.local
+```
+
+To uninstall:
+
+```sh
+sudo make uninstall
+```
+
 ### Web (WASM)
 
-Using [Trunk](https://trunkrs.dev/):
+Using [Trunk](https://trunkrs.dev):
 
 ```sh
 trunk serve --release
 ```
 
-Then open `http://127.0.0.1:8080`.
+Then open `http://127.0.0.1:8080` in your browser.
 
-<!--
-## Links
+## More Links
 
-- https://cliford.net/posts/minesweeper
-- https://cliford.net/projects/minesweeper -->
+- https://cliford.net/projects/minesweeper

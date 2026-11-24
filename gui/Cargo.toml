@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 
+[[bin]]
+name = "minesweep_rs"
+path = "src/main.rs"
+
 [package.metadata.docs.rs]
 all-features = true
 targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
@@ -32,3 +36,7 @@ env_logger = "0.11.8"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 wasm-bindgen-futures = "0.4.50"
 web-sys = "0.3.70"
+
+# windows build deps
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

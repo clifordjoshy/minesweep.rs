@@ -432,7 +432,7 @@ impl app::App {
     pub fn window_size_for_difficulty(d: config::Difficulty) -> egui::Vec2 {
         let (w, h, _) = d.params();
         egui::vec2(
-            (w as f32 * config::CELL_SIZE + 24.).max(590.),
+            (w as f32 * config::CELL_SIZE + 24.).max(600.),
             h as f32 * config::CELL_SIZE + 160.0,
         )
     }

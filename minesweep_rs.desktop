@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=minesweep.rs
+GenericName=Minesweeper
+Comment=Minesweeper, but logically solvable!
+Exec=minesweep_rs
+Icon=minesweep_rs
+Terminal=false
+Categories=Game;
+StartupWMClass=minesweep_rs
