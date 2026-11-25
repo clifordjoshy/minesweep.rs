@@ -1,12 +1,8 @@
 [package]
-name = "gui"
+name = "minesweep_rs"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
-
-[[bin]]
-name = "minesweep_rs"
-path = "src/main.rs"
 
 [package.metadata.docs.rs]
 all-features = true

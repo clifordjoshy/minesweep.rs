@@ -1122,23 +1122,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gui"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui_extras",
- "env_logger",
- "getrandom 0.4.3",
- "log",
- "minesweeper_core",
- "serde",
- "wasm-bindgen-futures",
- "web-sys",
- "winresource",
-]
-
-[[package]]
 name = "guillotiere"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1489,6 +1472,23 @@ dependencies = [
  "phf",
  "phf_shared",
  "unicase",
+]
+
+[[package]]
+name = "minesweep_rs"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui_extras",
+ "env_logger",
+ "getrandom 0.4.3",
+ "log",
+ "minesweeper_core",
+ "serde",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "winresource",
 ]
 
 [[package]]
