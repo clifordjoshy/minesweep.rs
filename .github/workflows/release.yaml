@@ -62,7 +62,7 @@ jobs:
           NAME="${BIN_NAME}-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/${NAME}"
           cp "target/${{ matrix.target }}/release/${BIN_NAME}${{ matrix.ext }}" "dist/${NAME}/"
-          cp "LICENSE" "dist/LICENSE"
+          cp "LICENSE" "dist/${NAME}/"
 
           cd dist
           if [ "${{ matrix.archive }}" = "zip" ]; then
